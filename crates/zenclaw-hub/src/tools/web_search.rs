@@ -36,7 +36,7 @@ fn pick_user_agent() -> &'static str {
     USER_AGENTS[idx]
 }
 
-fn percent_encode(s: &str) -> String {
+pub fn percent_encode(s: &str) -> String {
     s.chars().map(|c| match c {
         'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
         ' ' => "+".to_string(),

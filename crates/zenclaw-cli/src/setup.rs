@@ -109,6 +109,31 @@ const PROVIDERS: &[ProviderInfo] = &[
         needs_key: false,
     },
     ProviderInfo {
+        name: "deepseek",
+        display: "🐋 DeepSeek (Powerful & Affordable)",
+        models: &[
+            "deepseek-chat",
+            "deepseek-reasoner",
+        ],
+        default_model: "deepseek-chat",
+        env_var: "DEEPSEEK_API_KEY",
+        api_base: Some("https://api.deepseek.com/v1"),
+        needs_key: true,
+    },
+    ProviderInfo {
+        name: "openclaw",
+        display: "🦦 OpenClaw (Local API Gateway)",
+        models: &[
+            "openclaw-model",
+            "gemini-2.5-flash",
+            "claude-3-5-sonnet",
+        ],
+        default_model: "openclaw-model",
+        env_var: "OPENCLAW_API_KEY",
+        api_base: Some("http://localhost:18789/v1"),
+        needs_key: true,
+    },
+    ProviderInfo {
         name: "custom",
         display: "🌍 Custom API Endpoint (OpenAI Compatible)",
         models: &["(custom-model)"],
@@ -185,6 +210,8 @@ pub fn run_setup() -> anyhow::Result<()> {
                         "gemini" => "https://aistudio.google.com/apikey",
                         "groq" => "https://console.groq.com/keys",
                         "openrouter" => "https://openrouter.ai/keys",
+                        "deepseek" => "https://platform.deepseek.com/api_keys",
+                        "openclaw" => "Local Gateway (usually left blank, or check openclaw config)",
                         "custom" => "your custom provider's dashboard (leave blank if local)",
                         _ => "your provider's website",
                     }
@@ -649,6 +676,8 @@ pub fn run_model_switcher() -> anyhow::Result<Option<(String, String, Option<Str
                             "gemini" => "https://aistudio.google.com/apikey",
                             "groq" => "https://console.groq.com/keys",
                             "openrouter" => "https://openrouter.ai/keys",
+                            "deepseek" => "https://platform.deepseek.com/api_keys",
+                            "openclaw" => "Local Gateway (usually left blank, or check openclaw config)",
                             "custom" => "your custom provider (leave blank if local endpoint)",
                             _ => "your provider's website",
                          }).dimmed());

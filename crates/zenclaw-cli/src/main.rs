@@ -29,7 +29,8 @@ use zenclaw_hub::skills::SkillManager;
 use zenclaw_hub::plugins::PluginManager;
 use zenclaw_hub::tools::{
     CodebaseSearchTool, CronTool, EditFileTool, EnvTool, HealthTool, HistoryTool, ListDirTool, ProcessTool,
-    ReadFileTool, ShellTool, SubAgentTool, SystemInfoTool, WebFetchTool, WebScrapeTool, WebSearchTool, WriteFileTool,
+    ReadFileTool, ShellTool, SubAgentTool, SystemInfoTool, WebFetchTool, WebScrapeTool,
+    WebSearchTool, WriteFileTool, SkillsMpTool,
 };
 
 // ─── CLI Definition ────────────────────────────────────────
@@ -304,6 +305,8 @@ fn create_provider(
         "openrouter" => OpenAiProvider::openrouter(api_key, model),
         "gemini" => OpenAiProvider::gemini(api_key, model),
         "groq" => OpenAiProvider::groq(api_key, model),
+        "deepseek" => OpenAiProvider::deepseek(api_key, model),
+        "openclaw" => OpenAiProvider::openclaw(api_key, model),
         _ => {
 
             if let Some(base) = api_base {
@@ -474,6 +477,7 @@ async fn build_agent(model: &str, skill_prompt: Option<&str>) -> Agent {
     agent.tools.register(WebFetchTool::new());
     agent.tools.register(WebScrapeTool::new());
     agent.tools.register(WebSearchTool::new());
+    agent.tools.register(SkillsMpTool::new());
     agent.tools.register(SystemInfoTool::new());
     agent.tools.register(CronTool::new());
     agent.tools.register(HealthTool::new());

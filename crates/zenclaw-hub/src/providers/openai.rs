@@ -93,6 +93,28 @@ impl OpenAiProvider {
             ..Default::default()
         })
     }
+
+    /// Create a provider for DeepSeek.
+    pub fn deepseek(api_key: &str, model: &str) -> Self {
+        Self::new(ProviderConfig {
+            provider: "deepseek".to_string(),
+            model: model.to_string(),
+            api_key: Some(api_key.to_string()),
+            api_base: Some("https://api.deepseek.com/v1".to_string()),
+            ..Default::default()
+        })
+    }
+
+    /// Create a provider for OpenClaw local API gateway.
+    pub fn openclaw(api_key: &str, model: &str) -> Self {
+        Self::new(ProviderConfig {
+            provider: "openclaw".to_string(),
+            model: model.to_string(),
+            api_key: Some(api_key.to_string()),
+            api_base: Some("http://localhost:18789/v1".to_string()), // Often 18789 for openclaw or 8045 depending on proxy
+            ..Default::default()
+        })
+    }
 }
 
 

@@ -1,0 +1,175 @@
+//! SkillsMP Integration — Dymanically fetch and learn new AI skills.
+//!
+//! Connects to SkillsMP.com, a community marketplace for SKILL.md files.
+//! Bypasses Cloudflare block by utilizing Jina Reader API natively.
+//!
+
+use async_trait::async_trait;
+use reqwest::Client;
+use serde_json::{json, Value};
+use tracing::{info, warn, debug};
+
+use zenclaw_core::error::{Result, ZenClawError};
+use zenclaw_core::tool::Tool;
+
+pub struct SkillsMpTool {
+    client: Client,
+}
+
+impl SkillsMpTool {
+    pub fn new() -> Self {
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .user_agent("zenclaw-bot")
+            .build()
+            .unwrap_or_default();
+
+        Self { client }
+    }
+}
+
+impl Default for SkillsMpTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for SkillsMpTool {
+    fn name(&self) -> &str {
+        "skillsmp_fetch"
+    }
+
+    fn description(&self) -> &str {
+        "Search and dynamically fetch new AI Agent Skills from SkillsMP.com marketplace.\n\
+        Skills are standardized instructions (SKILL.md) that give you new abilities to solve complex multi-step tasks.\n\
+        Use this WHENEVER you face a task you are unsure how to handle optimally (e.g. integrating a new API, deploying to a specific cloud, setting up a framework).\n\
+        It returns expert instructions on exactly how to accomplish the task."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What skill do you need? E.g. 'deploy react app to vercel', 'build python fastapi', 'analyze github repo'."
+                }
+            },
+            "required": ["query"]
+        })
+    }
+
+    async fn execute(&self, args: Value) -> Result<String> {
+        let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+        if query.trim().is_empty() {
+            return Err(ZenClawError::ToolExecution { 
+                tool: "skillsmp".into(), 
+                message: "query is required".into() 
+            });
+        }
+
+        info!("Searching SkillsMP for: {}", query);
+
+        let encoded_query = crate::tools::web_search::percent_encode(&format!("site:skillsmp.com {}", query));
+        let search_url = format!("https://s.jina.ai/?q={}", encoded_query);
+        
+        // Adding the required Jina authorization format:
+        let mut req = self.client.get(&search_url).header("Accept", "application/json");
+
+        let jina_key_env = std::env::var("JINA_API_KEY").unwrap_or_default();
+        if !jina_key_env.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", jina_key_env));
+        }
+
+        let res = req.send().await.map_err(|e| ZenClawError::ToolExecution { 
+            tool: "skillsmp".into(), 
+            message: format!("Search failed: {}", e) 
+        })?;
+        
+        if !res.status().is_success() {
+             return Err(ZenClawError::ToolExecution { 
+                 tool: "skillsmp".into(), 
+                 message: format!("Jina API Error: {} (ensure JINA_API_KEY is valid)", res.status()) 
+             });
+        }
+
+        let search_text = res.text().await.map_err(|e| ZenClawError::ToolExecution { 
+            tool: "skillsmp".into(), 
+            message: format!("Parse text error: {}", e) 
+        })?;
+        
+        let search_data: Value = serde_json::from_str(&search_text)
+            .map_err(|e| ZenClawError::ToolExecution { 
+                tool: "skillsmp".into(), 
+                message: format!("Parse json error: {}", e) 
+            })?;
+            
+        let data_arr = search_data.get("data").and_then(|d| d.as_array());
+        if data_arr.is_none() || data_arr.unwrap().is_empty() {
+            return Ok(format!("No relevant skills found on SkillsMP for '{}'. You will have to use your own knowledge or standard web search.", query));
+        }
+
+        // Try to get the first valid URL
+        let mut skill_url_opt = None;
+        let mut title_opt = "Unknown Skill".to_string();
+        
+        for item in data_arr.unwrap() {
+            if let Some(url) = item.get("url").and_then(|u| u.as_str()) {
+                if url.contains("skillsmp.com") {
+                    skill_url_opt = Some(url.to_string());
+                    if let Some(t) = item.get("title").and_then(|title| title.as_str()) {
+                        title_opt = t.to_string();
+                    }
+                    break;
+                }
+            }
+        }
+        
+        if skill_url_opt.is_none() {
+             return Ok(format!("No valid SkillsMP links found in the search results."));
+        }
+        
+        let skill_url = skill_url_opt.unwrap();
+
+        info!("Found skill '{}' at {}, fetching content...", title_opt, skill_url);
+        
+        // Fetch via Jina Reader
+        let read_url = format!("https://r.jina.ai/{}", skill_url);
+        let mut read_req = self.client.get(&read_url)
+            .header("X-Return-Format", "markdown");
+            
+        if !jina_key_env.is_empty() {
+            read_req = read_req.header("Authorization", format!("Bearer {}", jina_key_env));
+        }
+        
+        let read_res = read_req.send().await.map_err(|e| ZenClawError::ToolExecution { 
+            tool: "skillsmp".into(), 
+            message: format!("Read failed: {}", e) 
+        })?;
+        
+        if !read_res.status().is_success() {
+             warn!("Failed to fetch skill content from {}", skill_url);
+             return Ok(format!("Found skill '{}' at {} but failed to fetch its content. Try another approach.", title_opt, skill_url));
+        }
+
+        let skill_content = read_res.text().await.map_err(|e| ZenClawError::ToolExecution { 
+            tool: "skillsmp".into(), 
+            message: e.to_string() 
+        })?;
+        
+        debug!("Fetched skill content from SkillsMP.");
+        
+        Ok(format!(
+            "🎯 SKILL FOUND FROM SkillsMP Marketplace 🎯\n\n\
+            Title: {}\n\
+            URL: {}\n\
+            \n\
+            === SKILL INSTRUCTIONS ===\n\
+            {}\n\
+            === END OF SKILL ===\n\n\
+            Please carefully read and execute the instructions above step-by-step to complete the user's task.", 
+            title_opt, skill_url, skill_content
+        ))
+    }
+}
