@@ -73,14 +73,26 @@ impl Tool for WebScrapeTool {
         // 1. Try Jina Reader API to get clean Markdown
         let target_url = format!("https://r.jina.ai/{}", url);
         
-        let request = self.client.get(&target_url)
+        let mut request = self.client.get(&target_url)
             .header("X-Return-Format", "markdown");
+
+        if let Ok(key) = std::env::var("JINA_API_KEY") {
+            request = request.header("Authorization", format!("Bearer {}", key));
+        }
 
         match request.send().await {
             Ok(resp) => {
                 let status = resp.status();
                 if !status.is_success() {
-                    tracing::warn!("Jina Reader API failed with status {}. Falling back to local Headless Browser...", status);
+                    if status.as_u16() == 401 || status.as_u16() == 403 {
+                        let has_key = std::env::var("JINA_API_KEY").is_ok();
+                        tracing::error!(
+                            "Jina Reader AUTH FAILED (status {}). Key configured: {}. The API key may be invalid or expired.",
+                            status, has_key
+                        );
+                    } else {
+                        tracing::warn!("Jina Reader API failed with status {}. Falling back to local Headless Browser...", status);
+                    }
                 } else {
                     let body = resp.text().await.unwrap_or_default();
                     let truncated = if body.len() > max_chars {
@@ -135,7 +147,14 @@ impl Tool for WebScrapeTool {
                     Ok(format!("Error: Headless browser failed. Status: {}. Error: {}", output.status, stderr))
                 }
             }
-            Err(e) => Ok(format!("Error: Both Jina API and Local Headless Browser failed to extract {}: {}", url, e)),
+            Err(e) => {
+                let jina_hint = if std::env::var("JINA_API_KEY").is_err() {
+                    " ⚠️ JINA_API_KEY is NOT set — Jina Reader requires authentication. Ask user to configure it via Settings → Set JINA_API_KEY."
+                } else {
+                    ""
+                };
+                Ok(format!("Error: Both Jina API and Local Headless Browser failed to extract {}: {}{}", url, e, jina_hint))
+            }
         }
     }
 }

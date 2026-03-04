@@ -320,6 +320,50 @@ pub async fn run_tui(
                     let len = ev.data["result_len"].as_u64().unwrap_or(0);
                     let _ = tx_bus.send(AppEvent::ToolComplete(tool, len, Duration::from_millis(0))).await;
                 }
+                // Show RAG events as completed inline entries
+                "rag_inject" | "rag_search" => {
+                    let status = ev.format_status().unwrap_or_default();
+                    let _ = tx_bus.send(AppEvent::ToolStart("rag".into(), status.clone())).await;
+                    let _ = tx_bus.send(AppEvent::ToolComplete("rag".into(), 0, Duration::from_millis(0))).await;
+                    let _ = tx_bus.send(AppEvent::AgentStatus(status)).await;
+                }
+                // Show reasoning as inline thinking entry
+                "agent_reasoning" => {
+                    let status = ev.format_status().unwrap_or_default();
+                    let _ = tx_bus.send(AppEvent::ToolStart("thinking".into(), status.clone())).await;
+                    let _ = tx_bus.send(AppEvent::ToolComplete("thinking".into(), 0, Duration::from_millis(0))).await;
+                    let _ = tx_bus.send(AppEvent::AgentStatus(status)).await;
+                }
+                // Show expansion as its own inline entry (distinct from audit)
+                "answer_expansion" => {
+                    let status = ev.format_status().unwrap_or_default();
+                    let _ = tx_bus.send(AppEvent::ToolStart("expand".into(), status.clone())).await;
+                    let _ = tx_bus.send(AppEvent::ToolComplete("expand".into(), 0, Duration::from_millis(0))).await;
+                    let _ = tx_bus.send(AppEvent::AgentStatus(status)).await;
+                }
+                // Show audit as visible inline entry
+                "answer_audit" => {
+                    let status = ev.format_status().unwrap_or_default();
+                    let _ = tx_bus.send(AppEvent::ToolStart("audit".into(), status.clone())).await;
+                    let _ = tx_bus.send(AppEvent::AgentStatus(status)).await;
+                }
+                "audit_result" => {
+                    let status = ev.format_status().unwrap_or_default();
+                    let _ = tx_bus.send(AppEvent::ToolComplete("audit".into(), 0, Duration::from_millis(0))).await;
+                    let _ = tx_bus.send(AppEvent::AgentStatus(status)).await;
+                }
+                "answer_refine" => {
+                    let status = ev.format_status().unwrap_or_default();
+                    // First ensure previous 'audit' is marked done
+                    let _ = tx_bus.send(AppEvent::ToolComplete("audit".into(), 0, Duration::from_millis(0))).await;
+                    let _ = tx_bus.send(AppEvent::ToolStart("refine".into(), status.clone())).await;
+                    let _ = tx_bus.send(AppEvent::AgentStatus(status)).await;
+                }
+                "refine_complete" => {
+                    let _ = tx_bus.send(AppEvent::ToolComplete("refine".into(), 0, Duration::from_millis(0))).await;
+                    let _ = tx_bus.send(AppEvent::AgentStatus("✅ Refinement complete".into())).await;
+                }
+                // General status events (agent_think, memory_truncate, llm_retry, json_retry)
                 _ => {
                     if let Some(msg) = ev.format_status() {
                         let _ = tx_bus.send(AppEvent::AgentStatus(msg)).await;

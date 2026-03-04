@@ -86,7 +86,8 @@ impl SystemEvent {
             }
 
             "memory_truncate" => {
-                Some("🧹 Trimming old conversation to save memory...".to_string())
+                let status = self.data["status"].as_str().unwrap_or("📚 Summarizing older conversation into Memory Card...");
+                Some(status.to_string())
             }
 
             "tool_timeout" => {
@@ -106,6 +107,51 @@ impl SystemEvent {
                 }
             }
 
+            "rag_inject" => {
+                Some("📚 RAG context found — injecting relevant knowledge...".to_string())
+            }
+
+            "rag_search" => {
+                Some("🔎 Searching knowledge base for relevant context...".to_string())
+            }
+
+            "json_retry" => {
+                Some("🔄 Response wasn't valid JSON — retrying with correction...".to_string())
+            }
+
+            "agent_reasoning" => {
+                let reasoning = self.data["reasoning"].as_str().unwrap_or("");
+                let preview = if reasoning.len() > 100 { &reasoning[..100] } else { reasoning };
+                Some(format!("💭 Thinking: {}...", preview))
+            }
+
+            "answer_expansion" => {
+                let len = self.data["original_len"].as_u64().unwrap_or(0);
+                Some(format!("📝 Answer too brief ({} chars) — requesting detailed elaboration...", len))
+            }
+
+            "answer_audit" => {
+                Some("🔍 Auditing answer quality before delivering...".to_string())
+            }
+
+            "audit_result" => {
+                let score = self.data["score"].as_u64().unwrap_or(0);
+                let pass = self.data["pass"].as_bool().unwrap_or(true);
+                if pass {
+                    Some(format!("✅ Quality audit passed ({}/10)", score))
+                } else {
+                    Some(format!("⚠️  Quality audit: {}/10 — needs improvement", score))
+                }
+            }
+
+            "answer_refine" => {
+                let status = self.data["status"].as_str().unwrap_or("Refining...");
+                Some(format!("🔧 {}", status))
+            }
+
+            "refine_complete" => {
+                Some("✅ Refinement finished".to_string())
+            }
 
             _ => None,
         }

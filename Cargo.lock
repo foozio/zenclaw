@@ -999,6 +999,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dotenvy"
+version = "0.15.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
+
+[[package]]
 name = "downcast-rs"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4728,7 +4734,7 @@ dependencies = [
 
 [[package]]
 name = "zenclaw-cli"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "anyhow",
  "arboard",
@@ -4737,6 +4743,7 @@ dependencies = [
  "colored",
  "crossterm 0.28.1",
  "dirs",
+ "dotenvy",
  "indicatif",
  "ratatui",
  "regex",
@@ -4757,7 +4764,7 @@ dependencies = [
 
 [[package]]
 name = "zenclaw-core"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4776,7 +4783,7 @@ dependencies = [
 
 [[package]]
 name = "zenclaw-hub"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -101,6 +101,9 @@ impl Tool for EnvTool {
                     ("TELEGRAM_BOT_TOKEN", "Telegram Bot"),
                     ("DISCORD_BOT_TOKEN", "Discord Bot"),
                     ("ZENCLAW_API_KEY", "ZenClaw API Auth"),
+                    ("JINA_API_KEY", "Jina Reader & Search"),
+                    ("OPENWEATHER_API_KEY", "OpenWeatherMap"),
+                    ("SERPER_API_KEY", "Serper.dev Web Search"),
                 ];
 
                 let mut output = String::from("API Key Status:\n");

@@ -24,7 +24,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use core::convert::Infallible;
 use tracing::info;
 
-use zenclaw_core::agent::Agent;
+use zenclaw_core::agent::{Agent, ProcessOptions};
+use zenclaw_core::error::ApiErrorEnvelope;
 use zenclaw_core::memory::MemoryStore;
 use zenclaw_core::provider::LlmProvider;
 use zenclaw_core::bus::EventBus;
@@ -51,6 +52,12 @@ pub struct ChatRequest {
     pub media: Vec<String>,
     #[serde(default = "default_session")]
     pub session: String,
+    /// Optional system prompt override for this request.
+    pub system: Option<String>,
+    /// Optional model override for this request (fallback to server default).
+    pub model: Option<String>,
+    /// Optional response format: "json" to enforce JSON output.
+    pub response_format: Option<String>,
 }
 
 fn default_session() -> String {
@@ -109,11 +116,6 @@ pub struct RagSearchResponse {
     pub count: usize,
 }
 
-#[derive(Serialize)]
-pub struct ErrorResponse {
-    pub error: String,
-}
-
 // ─── Handlers ──────────────────────────────────────────────
 
 async fn health() -> Json<serde_json::Value> {
@@ -137,12 +139,18 @@ async fn status(State(state): State<SharedState>) -> Json<StatusResponse> {
 async fn chat(
     State(state): State<SharedState>,
     Json(req): Json<ChatRequest>,
-) -> Result<Json<ChatResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<ChatResponse>, (StatusCode, Json<ApiErrorEnvelope>)> {
     let s = state.lock().await;
+
+    let opts = ProcessOptions {
+        system_prompt: req.system,
+        model: req.model,
+        response_format: req.response_format,
+    };
 
     match s
         .agent
-        .process_with_media(s.provider.as_ref(), s.memory.as_ref(), &req.message, req.media.clone(), &req.session, None)
+        .process_with_media(s.provider.as_ref(), s.memory.as_ref(), &req.message, req.media.clone(), &req.session, None, opts)
         .await
     {
         Ok(response) => Ok(Json(ChatResponse {
@@ -151,9 +159,7 @@ async fn chat(
         })),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
+            Json(ApiErrorEnvelope::from_error(&e)),
         )),
     }
 }
@@ -167,16 +173,15 @@ async fn chat_stream(
     let bus = EventBus::new(32);
     let mut bus_rx = bus.subscribe_system();
 
-    // The state and trait objects need to be cloned/Arc'd to be spawned, 
-    // but we can't easily move s.agent and s.provider. 
-    // So let's clone the Agent and use a specialized spawn.
-    // However, they aren't clonable easily. 
-    // Wait, the agent.process requires &self, provider, memory.
-    // Instead of spawning agent, we can run agent in another tokio task but we need Arc<Mutex<...>>.
     let shared_state = state.clone();
     let message = req.message.clone();
     let session = req.session.clone();
     let media = req.media.clone();
+    let opts = ProcessOptions {
+        system_prompt: req.system,
+        model: req.model,
+        response_format: req.response_format,
+    };
 
     // Background task listening to EventBus
     let tx_clone = tx.clone();
@@ -203,12 +208,15 @@ async fn chat_stream(
         let p = s2.provider.as_ref();
         let m = s2.memory.as_ref();
 
-        match s2.agent.process_with_media(p, m, &message, media, &session, Some(&bus)).await {
+        match s2.agent.process_with_media(p, m, &message, media, &session, Some(&bus), opts).await {
             Ok(response) => {
                 let _ = tx_for_agent.send(Ok(Event::default().event("result").data(response))).await;
             }
             Err(e) => {
-                let _ = tx_for_agent.send(Ok(Event::default().event("error").data(e.to_string()))).await;
+                // SSE errors also use consistent JSON envelope
+                let envelope = ApiErrorEnvelope::from_error(&e);
+                let err_json = serde_json::to_string(&envelope).unwrap_or_else(|_| e.to_string());
+                let _ = tx_for_agent.send(Ok(Event::default().event("error").data(err_json))).await;
             }
         }
     });
@@ -219,7 +227,7 @@ async fn chat_stream(
 async fn rag_index(
     State(state): State<SharedState>,
     Json(req): Json<RagIndexRequest>,
-) -> Result<Json<RagIndexResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<RagIndexResponse>, (StatusCode, Json<ApiErrorEnvelope>)> {
     let s = state.lock().await;
 
     match &s.rag {
@@ -230,16 +238,12 @@ async fn rag_index(
             })),
             Err(e) => Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: e.to_string(),
-                }),
+                Json(ApiErrorEnvelope::new("RAG_INDEX_ERROR", &e.to_string())),
             )),
         },
         None => Err((
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(ErrorResponse {
-                error: "RAG not enabled".to_string(),
-            }),
+            Json(ApiErrorEnvelope::new("RAG_UNAVAILABLE", "RAG not enabled")),
         )),
     }
 }
@@ -247,7 +251,7 @@ async fn rag_index(
 async fn rag_search(
     State(state): State<SharedState>,
     Json(req): Json<RagSearchRequest>,
-) -> Result<Json<RagSearchResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<RagSearchResponse>, (StatusCode, Json<ApiErrorEnvelope>)> {
     let s = state.lock().await;
 
     match &s.rag {
@@ -269,16 +273,12 @@ async fn rag_search(
             }
             Err(e) => Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: e.to_string(),
-                }),
+                Json(ApiErrorEnvelope::new("RAG_SEARCH_ERROR", &e.to_string())),
             )),
         },
         None => Err((
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(ErrorResponse {
-                error: "RAG not enabled".to_string(),
-            }),
+            Json(ApiErrorEnvelope::new("RAG_UNAVAILABLE", "RAG not enabled")),
         )),
     }
 }

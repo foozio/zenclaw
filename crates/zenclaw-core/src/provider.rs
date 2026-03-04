@@ -29,6 +29,8 @@ pub struct ChatRequest {
     pub model: Option<String>,
     pub max_tokens: u32,
     pub temperature: f32,
+    /// Response format hint: "json" to request structured JSON output.
+    pub response_format: Option<String>,
 }
 
 impl Default for ChatRequest {
@@ -39,6 +41,7 @@ impl Default for ChatRequest {
             model: None,
             max_tokens: 4096,
             temperature: 0.7,
+            response_format: None,
         }
     }
 }

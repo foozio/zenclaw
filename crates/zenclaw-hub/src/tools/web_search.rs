@@ -141,6 +141,15 @@ impl Tool for WebSearchTool {
             self.wikipedia_search(query, 4, lang),
         );
 
+        // ── Engine diagnostics (visible in log + appended to output if Jina failed) ──
+        let jina_ok = !jina_results.is_empty();
+        let ddg_ok = !lite_results.is_empty();
+        let wiki_ok = !wiki_results.is_empty();
+        tracing::info!(
+            "web_search engines: jina={} results, ddg={} results, wiki={} results",
+            jina_results.len(), lite_results.len(), wiki_results.len()
+        );
+
         // ── Strategy 1: DDG Instant Answer (direct factual answer, highest priority) ──
         if let Some(instant) = instant_opt {
             output.push_str(&instant);
@@ -178,9 +187,15 @@ impl Tool for WebSearchTool {
         if output.trim().is_empty() && let Some(wiki_url) = wiki_top_url {
             tracing::info!("web_search: Jina Reader fallback for: {}", wiki_url);
             let jina_url = format!("https://r.jina.ai/{}", wiki_url);
-            if let Ok(resp) = self.client.get(&jina_url)
-                .header("Accept", "text/plain")
-                .send().await
+            
+            let mut req = self.client.get(&jina_url)
+                .header("Accept", "text/plain");
+                
+            if let Ok(key) = std::env::var("JINA_API_KEY") {
+                req = req.header("Authorization", format!("Bearer {}", key));
+            }
+
+            if let Ok(resp) = req.send().await
                 && let Ok(text) = resp.text().await
             {
                 let trimmed = if text.len() > 2000 {
@@ -215,19 +230,37 @@ impl Tool for WebSearchTool {
         }
 
         if output.trim().is_empty() {
+            let jina_hint = if std::env::var("JINA_API_KEY").is_err() {
+                "\n• ⚠️ JINA_API_KEY is NOT configured! Jina Search (the most reliable engine) is disabled. \
+                 Ask the user to set it via: Settings → Set JINA_API_KEY, or `zenclaw config set jina_api_key <KEY>`"
+            } else {
+                ""
+            };
             return Ok(format!(
                 "⚠️ No results found for: \"{}\"\n\n\
                 Try:\n\
                 • Rephrase the query (simpler terms)\n\
                 • Use `web_fetch` with a direct URL (e.g. wikipedia page)\n\
                 • Use `web_scrape` for deep content extraction\n\
-                • The network may be restricted — check connectivity",
-                query
+                • The network may be restricted — check connectivity{}",
+                query, jina_hint
             ));
         }
 
+        // Always append engine diagnostics to help AI understand result quality
+        if !jina_ok {
+            if std::env::var("JINA_API_KEY").is_err() {
+                output.push_str("\n---\n⚠️ JINA_API_KEY is NOT configured. Jina Search (most reliable) is disabled. \
+                Ask the user to configure it via: Settings → Set JINA_API_KEY\n");
+            } else {
+                output.push_str("\n---\n⚠️ Jina Search returned 0 results despite having JINA_API_KEY configured. \
+                The API key may be INVALID or EXPIRED. Suggest the user verify and update it in Settings → Set JINA_API_KEY. \
+                Results above are from DuckDuckGo/Wikipedia only and may be less accurate.\n");
+            }
+        }
+
         let bytes = output.len();
-        tracing::debug!("web_search: {} total results ({} bytes)", take, bytes);
+        tracing::debug!("web_search: {} total results ({} bytes, jina={}, ddg={}, wiki={})", take, bytes, jina_ok, ddg_ok, wiki_ok);
         Ok(output)
     }
 }
@@ -322,6 +355,10 @@ impl WebSearchTool {
             req = req.header("X-Locale", locale);
         }
 
+        if let Ok(key) = std::env::var("JINA_API_KEY") {
+            req = req.header("Authorization", format!("Bearer {}", key));
+        }
+
         let resp = match req.send().await {
             Ok(r) => r,
             Err(e) => {
@@ -331,6 +368,30 @@ impl WebSearchTool {
         };
 
         let status = resp.status();
+
+        // ── Check HTTP status FIRST ────────────────────────────────────────
+        if !status.is_success() {
+            let body_preview = resp.text().await.unwrap_or_default();
+            let preview = if body_preview.len() > 300 { &body_preview[..300] } else { &body_preview };
+            let has_key = std::env::var("JINA_API_KEY").is_ok();
+            
+            if status.as_u16() == 401 || status.as_u16() == 403 {
+                tracing::error!(
+                    "Jina Search AUTH FAILED (status {}). API key configured: {}. Response: {}",
+                    status, has_key, preview
+                );
+                if has_key {
+                    tracing::error!("JINA_API_KEY is set but was REJECTED by the server. The key may be expired, invalid, or from a different account. Please verify and update it in Settings → Set JINA_API_KEY.");
+                }
+            } else {
+                tracing::warn!(
+                    "Jina Search failed (status {}). Response: {}",
+                    status, preview
+                );
+            }
+            return vec![];
+        }
+
         let text = resp.text().await.unwrap_or_default();
 
         if text.len() < 20 {

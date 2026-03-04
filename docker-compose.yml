@@ -9,9 +9,18 @@ services:
       - "3000:3000"
     environment:
       - RUST_LOG=info
-      # Uncomment and set your provider:
+      # ─── ZenClaw Config via Environment ─────────────────
+      # These ZENCLAW_* variables are picked up automatically:
+      # - ZENCLAW_PROVIDER=openrouter
+      # - ZENCLAW_MODEL=anthropic/claude-3-haiku
+      # - ZENCLAW_API_KEY=sk-or-...
+      # - ZENCLAW_API_BASE=https://custom-api.example.com/v1
+      #
+      # Or use provider-specific API key variables:
       # - OPENAI_API_KEY=sk-...
       # - GEMINI_API_KEY=AI...
+      # - OPENROUTER_API_KEY=sk-or-...
+      # - GROQ_API_KEY=gsk_...
     volumes:
       - zenclaw-data:/home/zenclaw/.local/share/zenclaw
       - zenclaw-config:/home/zenclaw/.config/zenclaw

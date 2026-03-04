@@ -6,7 +6,7 @@
 
 use tracing::info;
 
-use zenclaw_core::agent::Agent;
+use zenclaw_core::agent::{Agent, ProcessOptions};
 use zenclaw_core::error::{Result, ZenClawError};
 use zenclaw_core::memory::MemoryStore;
 use zenclaw_core::provider::LlmProvider;
@@ -126,7 +126,7 @@ impl AgentRouter {
 
         let response = slot
             .agent
-            .process_with_media(provider, memory, message, media, session_key, None)
+            .process_with_media(provider, memory, message, media, session_key, None, ProcessOptions::default())
             .await?;
 
         Ok((slot.name.clone(), response))

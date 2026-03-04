@@ -355,7 +355,7 @@ async fn setup_bot_env(
     ))
 }
 
-/// Resolve provider config: CLI args → saved config → env vars → error
+/// Resolve provider config: CLI args → env vars (ZENCLAW_*) → saved config → defaults
 fn resolve_config(
     cli_provider: Option<&str>,
     cli_model: Option<&str>,
@@ -364,18 +364,22 @@ fn resolve_config(
 ) -> anyhow::Result<(String, String, String, Option<String>)> {
     let saved = setup::load_saved_config();
 
+    // Priority: CLI flag → ZENCLAW_* env var → saved config → default
     let provider_name = cli_provider
         .map(|s| s.to_string())
+        .or_else(|| std::env::var("ZENCLAW_PROVIDER").ok().filter(|v| !v.is_empty()))
         .or_else(|| saved.as_ref().map(|c| c.provider.provider.clone()))
         .unwrap_or_else(|| "openai".to_string());
 
     let model = cli_model
         .map(|s| s.to_string())
+        .or_else(|| std::env::var("ZENCLAW_MODEL").ok().filter(|v| !v.is_empty()))
         .or_else(|| saved.as_ref().map(|c| c.provider.model.clone()))
         .unwrap_or_else(|| default_model(&provider_name).to_string());
 
     let api_key = cli_api_key
         .map(|s| s.to_string())
+        .or_else(|| std::env::var("ZENCLAW_API_KEY").ok().filter(|v| !v.is_empty()))
         .or_else(|| {
             saved
                 .as_ref()
@@ -407,6 +411,7 @@ fn resolve_config(
                  Run {} to set up, or:\n\
                  • {} to set key directly\n\
                  • Set {} environment variable\n\
+                 • Set {} for universal override\n\
                  • Pass {}",
                 "zenclaw setup".cyan(),
                 "zenclaw config set api_key <KEY>".cyan(),
@@ -417,13 +422,14 @@ fn resolve_config(
                     "groq" => "GROQ_API_KEY",
                     _ => "<PROVIDER>_API_KEY",
                 },
-
+                "ZENCLAW_API_KEY".cyan(),
                 "--api-key <KEY>".cyan()
             )
         })?;
 
     let api_base = cli_api_base
         .map(|s| s.to_string())
+        .or_else(|| std::env::var("ZENCLAW_API_BASE").ok().filter(|v| !v.is_empty()))
         .or_else(|| saved.as_ref().and_then(|c| c.provider.api_base.clone()));
 
     Ok((provider_name, model, api_key, api_base))
@@ -489,6 +495,28 @@ async fn build_agent(model: &str, skill_prompt: Option<&str>) -> Agent {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load .env automatically
+    dotenvy::dotenv().ok();
+
+    // Check saved config and inject tool API keys into env so we don't have to rewrite tools 
+    if let Some(config) = setup::load_saved_config() {
+        if let Some(key) = config.tools.jina_api_key {
+            if !key.trim().is_empty() {
+                unsafe { std::env::set_var("JINA_API_KEY", key); }
+            }
+        }
+        if let Some(key) = config.tools.openweather_api_key {
+            if !key.trim().is_empty() {
+                unsafe { std::env::set_var("OPENWEATHER_API_KEY", key); }
+            }
+        }
+        if let Some(key) = config.tools.serper_api_key {
+            if !key.trim().is_empty() {
+                unsafe { std::env::set_var("SERPER_API_KEY", key); }
+            }
+        }
+    }
+
     // Setup filesystem log trailing instead of dumping tracing to stdout
     let log_dir = setup::data_dir().join("logs");
     std::fs::create_dir_all(&log_dir).ok();
@@ -699,7 +727,10 @@ async fn main() -> anyhow::Result<()> {
                                 tui_menu::MenuItem { label: "1. Show Configuration".into(), description: "Display current config values.".into(), action_key: "0".into() },
                                 tui_menu::MenuItem { label: "2. Show Config Path".into(), description: "Show the absolute path to your config file.".into(), action_key: "1".into() },
                                 tui_menu::MenuItem { label: "3. Run Setup Wizard".into(), description: "Re-run the first-time setup wizard to generate a new config.".into(), action_key: "2".into() },
-                                tui_menu::MenuItem { label: "4. Back".into(), description: "Return to main menu.".into(), action_key: "3".into() },
+                                tui_menu::MenuItem { label: "4. Set JINA_API_KEY".into(), description: "Configure API Key for Web Search & Scrape plugin.".into(), action_key: "3".into() },
+                                tui_menu::MenuItem { label: "5. Set OPENWEATHER_API_KEY".into(), description: "Configure API Key for Weather data.".into(), action_key: "4".into() },
+                                tui_menu::MenuItem { label: "6. Set SERPER_API_KEY".into(), description: "Configure API Key for Serper.dev Search.".into(), action_key: "5".into() },
+                                tui_menu::MenuItem { label: "7. Back".into(), description: "Return to main menu.".into(), action_key: "6".into() },
                             ];
                             let config_sel = tui_menu::run_tui_menu("⚙️ Settings", &config_options, 0)?;
                             
@@ -727,7 +758,58 @@ async fn main() -> anyhow::Result<()> {
                                 Some("2") => {
                                     setup::run_setup().ok();
                                 },
-                                Some("3") | None => {
+                                Some("3") => {
+                                    if let Ok(Some(key)) = tui_menu::run_tui_input("Configure API Key", "Enter JINA_API_KEY (leave empty to clear):", "", false) {
+                                        let mut config = setup::load_saved_config().unwrap_or_default();
+                                        if key.trim().is_empty() {
+                                            config.tools.jina_api_key = None;
+                                        } else {
+                                            config.tools.jina_api_key = Some(key.trim().to_string());
+                                        }
+                                        if let Ok(()) = config.save(&ZenClawConfig::default_path()) {
+                                            if let Some(ref val) = config.tools.jina_api_key {
+                                                unsafe { std::env::set_var("JINA_API_KEY", val); }
+                                            } else {
+                                                unsafe { std::env::remove_var("JINA_API_KEY"); }
+                                            }
+                                        }
+                                    }
+                                },
+                                Some("4") => {
+                                    if let Ok(Some(key)) = tui_menu::run_tui_input("Configure API Key", "Enter OPENWEATHER_API_KEY (leave empty to clear):", "", false) {
+                                        let mut config = setup::load_saved_config().unwrap_or_default();
+                                        if key.trim().is_empty() {
+                                            config.tools.openweather_api_key = None;
+                                        } else {
+                                            config.tools.openweather_api_key = Some(key.trim().to_string());
+                                        }
+                                        if let Ok(()) = config.save(&ZenClawConfig::default_path()) {
+                                            if let Some(ref val) = config.tools.openweather_api_key {
+                                                unsafe { std::env::set_var("OPENWEATHER_API_KEY", val); }
+                                            } else {
+                                                unsafe { std::env::remove_var("OPENWEATHER_API_KEY"); }
+                                            }
+                                        }
+                                    }
+                                },
+                                Some("5") => {
+                                    if let Ok(Some(key)) = tui_menu::run_tui_input("Configure API Key", "Enter SERPER_API_KEY (leave empty to clear):", "", false) {
+                                        let mut config = setup::load_saved_config().unwrap_or_default();
+                                        if key.trim().is_empty() {
+                                            config.tools.serper_api_key = None;
+                                        } else {
+                                            config.tools.serper_api_key = Some(key.trim().to_string());
+                                        }
+                                        if let Ok(()) = config.save(&ZenClawConfig::default_path()) {
+                                            if let Some(ref val) = config.tools.serper_api_key {
+                                                unsafe { std::env::set_var("SERPER_API_KEY", val); }
+                                            } else {
+                                                unsafe { std::env::remove_var("SERPER_API_KEY"); }
+                                            }
+                                        }
+                                    }
+                                },
+                                Some("6") | None => {
                                     break Ok(());
                                 }
                                 _ => break Ok(())
@@ -850,10 +932,36 @@ async fn run_ask(
     let memory = zenclaw_core::memory::InMemoryStore::new();
     let agent = build_agent(&model, None).await;
 
-    match agent.process(&provider, &memory, message, "oneshot", None).await {
-        Ok(response) => println!("{}", response),
-        Err(e) => eprintln!("{}: {}", "Error".red(), e),
+    // Create bus for streaming status to user
+    let bus = EventBus::new(32);
+    let mut rx = bus.subscribe_system();
+
+    // Background task: print thinking/tool status to stderr
+    let status_handle = tokio::spawn(async move {
+        use std::io::Write;
+        while let Ok(event) = rx.recv().await {
+            if let Some(msg) = event.format_status() {
+                // Print status on stderr with carriage return for overwrite effect
+                eprint!("\r\x1b[2K\x1b[90m{}\x1b[0m", msg);
+                let _ = std::io::stderr().flush();
+            }
+        }
+    });
+
+    match agent.process(&provider, &memory, message, "oneshot", Some(&bus)).await {
+        Ok(response) => {
+            // Clear the status line before printing response
+            eprint!("\r\x1b[2K");
+            println!("{}", response);
+        }
+        Err(e) => {
+            eprint!("\r\x1b[2K");
+            eprintln!("{}: {}", "Error".red(), e);
+        }
     }
+
+    // Cleanup
+    status_handle.abort();
 
     Ok(())
 }

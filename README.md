@@ -64,20 +64,28 @@ ZenClaw drops the traditional messy CLI for a fully interactive Ratatui-based UI
 <br>
 
 - **ReAct Loop:** Autonomous Think → Act → Observe reasoning loop.
-- **5 LLM Providers:** OpenAI, Google Gemini, Ollama, OpenRouter, and LM Studio.
+- **7 LLM Providers:** OpenAI, Google Gemini, Groq, Ollama, OpenRouter, LM Studio, and Custom OpenAI-compatible endpoints.
 - **Built-in RAG & Auto-Inject:** Index files into SQLite FTS5 in seconds. The agent engine automatically searches and injects relevant context into the system prompt behind the scenes during conversations.
 - **Persistent Memory:** SQLite-backed conversational history context.
+- **Smart Memory Pruning:** Instead of discarding old messages, older conversation history is summarized into compact **"Memory Cards"** — preserving context while keeping token usage efficient.
+- **Tool Error Feedback:** When a tool call fails, ZenClaw sends the tool's JSON schema back to the LLM along with the error — preventing hallucination loops and guiding correct retry.
 - **Skills System:** Inject markdown files to shape the agent's behavior.
 </details>
 
 <details>
-<summary><b>🔧 15 Built-In Tools & Plugins</b></summary>
+<summary><b>🔧 16 Built-In Tools & Plugins</b></summary>
 <br>
 
-- `exec`, `read_file`, `write_file`, `edit_file`, `list_dir`
-- `web_fetch`, `web_search` (DuckDuckGo), `web_scrape` (Headless Chromium)
-- `cron` (Persistent background scheduler with autonomous **Proactive AI Agent Tasks**), `system_info`, `health`, `history`, `index_file`, `env`
+- **Filesystem:** `read_file`, `write_file`, `edit_file`, `list_dir`
+- **Execution:** `exec` (shell), `process` (spawn/kill/status), `sub_agent` (background AI workers)
+- **Web:** `web_search` (Multi-engine: Jina AI + DuckDuckGo + Wikipedia), `web_scrape` (Jina Reader + Headless fallback), `web_fetch` (raw HTTP/API)
+- **System:** `system_info`, `health` (CPU/RAM/Disk/Network), `env` (API key status check)
+- **Automation:** `cron` (Persistent background scheduler with autonomous **Proactive AI Agent Tasks**)
+- **Data:** `history` (export conversations), `index_file` (RAG indexer), `webhooks` (receive external events), `codebase_search` (regex code search)
 - **Plugin System:** Drop any Shell/Python script in the `plugins/` folder to create a new tool.
+
+> **Note:** `web_search` and `web_scrape` use [Jina AI](https://jina.ai/) for reliable, clean results. Configure your API key via **Settings → Set JINA_API_KEY** in the TUI dashboard.
+
 </details>
 
 <details>
@@ -125,6 +133,29 @@ This opens the **Main Menu**, where you can:
 3. Boot up the **Telegram/Discord/WhatsApp** bots.
 4. Start the **REST API** server.
 5. Monitor **Live System Logs**.
+
+### 3. Configure Tool API Keys (Optional but Recommended)
+
+For the best web search and scraping experience, configure your Jina AI API key:
+
+```bash
+# Option A: Via the TUI Dashboard
+zenclaw
+# → Settings → Set JINA_API_KEY → Paste your key
+
+# Option B: Via CLI
+zenclaw config set jina_api_key "jina_xxxxxxxxxxxx"
+
+# Option C: Via .env file (auto-loaded on startup)
+echo 'JINA_API_KEY=jina_xxxxxxxxxxxx' >> .env
+
+# Option D: Via environment variable
+export JINA_API_KEY="jina_xxxxxxxxxxxx"
+```
+
+Other supported tool API keys: `openweather_api_key`, `serper_api_key`.
+
+> Get a free Jina API key at: [https://jina.ai/](https://jina.ai/)
 
 ---
 
@@ -232,6 +263,17 @@ ZenClaw's design isolates safety and speed.
 
 1. **Rust Core (`crates/`):** Houses the ReAct Agent logic, SQLite Memory, Channel Hooks (Discord/Telegram/TUI), Axum Web Server, rate-limiting, and standard OS tools.
 2. **Node Bridge (`bridge/`):** Runs an isolated Puppeteer Chromium instance. Safe from memory leaks interfering with the main core logic. Rust calls Node via HTTP and Subprocesses gracefully.
+
+### Configuration Hierarchy
+
+ZenClaw resolves settings in this priority order (highest first):
+
+1. **CLI flags** (`--api-key`, `--model`, etc.)
+2. **Environment variables** (`ZENCLAW_API_KEY`, `JINA_API_KEY`, etc.)
+3. **`.env` file** in the working directory (auto-loaded via `dotenvy`)
+4. **Config file** (`~/.config/zenclaw/config.toml`)
+
+Tool-specific API keys (`jina_api_key`, `openweather_api_key`, `serper_api_key`) are stored in the config file under `[tools]` and automatically injected into the environment at startup.
 
 ## 🤝 Contributing & Building
 

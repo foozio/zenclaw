@@ -38,7 +38,7 @@ impl Tool for WebFetchTool {
     }
 
     fn description(&self) -> &str {
-        "Fetch content from a URL via HTTP GET. Returns the response body as text."
+        "Fetch raw HTTP content from a URL. DO NOT use this for searching google or bing (use 'web_search' instead). DO NOT use this for extracting articles (use 'web_scrape' instead). Use this ONLY for raw API endpoints."
     }
 
     fn parameters(&self) -> Value {

@@ -103,8 +103,12 @@ struct ApiRequest {
     messages: Vec<serde_json::Value>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tools: Vec<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<serde_json::Value>,
     max_tokens: u32,
     temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<serde_json::Value>,
 }
 
 /// Internal response body.
@@ -196,6 +200,10 @@ impl LlmProvider for OpenAiProvider {
                             }));
                         }
                         obj.insert("content".to_string(), serde_json::json!(parts));
+                    } else if m.content.is_none() {
+                        // Crucial proxy fix: some OpenAI-compatible endpoints (like Gemini mappers)
+                        // crash with "e is not iterable" when `content` is null (e.g., when sending back tool_calls).
+                        obj.insert("content".to_string(), serde_json::json!(""));
                     }
                 }
                 val
@@ -218,16 +226,45 @@ impl LlmProvider for OpenAiProvider {
             max_tokens = max_tokens.min(1024);
         }
 
+        // Build response_format for supported providers
+        let response_format_val = request.response_format.as_deref().and_then(|fmt| {
+            if fmt == "json" {
+                Some(serde_json::json!({ "type": "json_object" }))
+            } else {
+                None
+            }
+        });
+
+        // Set tool_choice to "auto" when tools are present
+        // Many OpenAI-compatible gateways require this explicitly
+        let tool_choice = if tools.is_empty() {
+            None
+        } else {
+            Some(serde_json::json!("auto"))
+        };
+
         let body = ApiRequest {
             model: model.clone(),
             messages,
             tools,
+            tool_choice,
             max_tokens,
             temperature: request.temperature,
+            response_format: response_format_val,
         };
 
 
         let api_key = self.config.api_key.as_deref().unwrap_or("");
+        
+        // Debug the exact payload we are sending to the API gateway (especially the tool calls/results)
+        debug!("Request Messages Payload: {}", serde_json::to_string(&body.messages).unwrap());
+
+        debug!(
+            "Sending request to {} with {} tools, tool_choice={:?}",
+            self.api_url,
+            body.tools.len(),
+            body.tool_choice
+        );
 
         let resp = self
             .client
@@ -271,6 +308,15 @@ impl LlmProvider for OpenAiProvider {
             .into_iter()
             .next()
             .ok_or_else(|| ZenClawError::Provider("No choices in response".to_string()))?;
+
+        let tc_count = choice.message.tool_calls.as_ref().map(|v| v.len()).unwrap_or(0);
+        debug!(
+            "Response: model={}, finish_reason={:?}, tool_calls={}, content_len={}",
+            actual_model,
+            choice.finish_reason,
+            tc_count,
+            choice.message.content.as_ref().map(|c| c.len()).unwrap_or(0)
+        );
 
         let tool_calls = choice
             .message
