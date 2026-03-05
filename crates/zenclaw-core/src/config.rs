@@ -32,6 +32,7 @@ pub struct ToolSettings {
     pub jina_api_key: Option<String>,
     pub openweather_api_key: Option<String>,
     pub serper_api_key: Option<String>,
+    pub skillsmp_api_key: Option<String>,
 }
 
 /// Agent-specific settings.

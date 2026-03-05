@@ -477,7 +477,9 @@ async fn build_agent(model: &str, skill_prompt: Option<&str>) -> Agent {
     agent.tools.register(WebFetchTool::new());
     agent.tools.register(WebScrapeTool::new());
     agent.tools.register(WebSearchTool::new());
-    agent.tools.register(SkillsMpTool::new());
+    
+    let config = zenclaw_core::config::ZenClawConfig::load(&zenclaw_core::config::ZenClawConfig::default_path()).unwrap_or_default();
+    agent.tools.register(SkillsMpTool::new(Some(config.tools)));
     agent.tools.register(SystemInfoTool::new());
     agent.tools.register(CronTool::new());
     agent.tools.register(HealthTool::new());
@@ -517,6 +519,11 @@ async fn main() -> anyhow::Result<()> {
         if let Some(key) = config.tools.serper_api_key {
             if !key.trim().is_empty() {
                 unsafe { std::env::set_var("SERPER_API_KEY", key); }
+            }
+        }
+        if let Some(key) = config.tools.skillsmp_api_key {
+            if !key.trim().is_empty() {
+                unsafe { std::env::set_var("SKILLSMP_API_KEY", key); }
             }
         }
     }
@@ -734,7 +741,8 @@ async fn main() -> anyhow::Result<()> {
                                 tui_menu::MenuItem { label: "4. Set JINA_API_KEY".into(), description: "Configure API Key for Web Search & Scrape plugin.".into(), action_key: "3".into() },
                                 tui_menu::MenuItem { label: "5. Set OPENWEATHER_API_KEY".into(), description: "Configure API Key for Weather data.".into(), action_key: "4".into() },
                                 tui_menu::MenuItem { label: "6. Set SERPER_API_KEY".into(), description: "Configure API Key for Serper.dev Search.".into(), action_key: "5".into() },
-                                tui_menu::MenuItem { label: "7. Back".into(), description: "Return to main menu.".into(), action_key: "6".into() },
+                                tui_menu::MenuItem { label: "7. Set SKILLSMP_API_KEY".into(), description: "Configure API Key for SkillsMP Integrations.".into(), action_key: "6".into() },
+                                tui_menu::MenuItem { label: "8. Back".into(), description: "Return to main menu.".into(), action_key: "7".into() },
                             ];
                             let config_sel = tui_menu::run_tui_menu("⚙️ Settings", &config_options, 0)?;
                             
@@ -813,7 +821,24 @@ async fn main() -> anyhow::Result<()> {
                                         }
                                     }
                                 },
-                                Some("6") | None => {
+                                Some("6") => {
+                                    if let Ok(Some(key)) = tui_menu::run_tui_input("Configure API Key", "Enter SKILLSMP_API_KEY (leave empty to clear):", "", false) {
+                                        let mut config = setup::load_saved_config().unwrap_or_default();
+                                        if key.trim().is_empty() {
+                                            config.tools.skillsmp_api_key = None;
+                                        } else {
+                                            config.tools.skillsmp_api_key = Some(key.trim().to_string());
+                                        }
+                                        if let Ok(()) = config.save(&ZenClawConfig::default_path()) {
+                                            if let Some(ref val) = config.tools.skillsmp_api_key {
+                                                unsafe { std::env::set_var("SKILLSMP_API_KEY", val); }
+                                            } else {
+                                                unsafe { std::env::remove_var("SKILLSMP_API_KEY"); }
+                                            }
+                                        }
+                                    }
+                                },
+                                Some("7") | None => {
                                     break Ok(());
                                 }
                                 _ => break Ok(())

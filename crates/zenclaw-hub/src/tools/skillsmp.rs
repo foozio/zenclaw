@@ -14,23 +14,29 @@ use zenclaw_core::tool::Tool;
 
 pub struct SkillsMpTool {
     client: Client,
+    api_key: String,
 }
 
 impl SkillsMpTool {
-    pub fn new() -> Self {
+    pub fn new(config: Option<zenclaw_core::config::ToolSettings>) -> Self {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .user_agent("zenclaw-bot")
             .build()
             .unwrap_or_default();
 
-        Self { client }
+        let api_key = config
+            .and_then(|c| c.skillsmp_api_key)
+            .or_else(|| std::env::var("SKILLSMP_API_KEY").ok())
+            .unwrap_or_default();
+
+        Self { client, api_key }
     }
 }
 
 impl Default for SkillsMpTool {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
@@ -71,15 +77,13 @@ impl Tool for SkillsMpTool {
 
         info!("Searching SkillsMP for: {}", query);
 
-        let encoded_query = crate::tools::web_search::percent_encode(&format!("site:skillsmp.com {}", query));
-        let search_url = format!("https://s.jina.ai/?q={}", encoded_query);
+        let encoded_query = crate::tools::web_search::percent_encode(query);
+        let search_url = format!("https://skillsmp.com/api/v1/skills/search?q={}", encoded_query);
         
-        // Adding the required Jina authorization format:
         let mut req = self.client.get(&search_url).header("Accept", "application/json");
 
-        let jina_key_env = std::env::var("JINA_API_KEY").unwrap_or_default();
-        if !jina_key_env.is_empty() {
-            req = req.header("Authorization", format!("Bearer {}", jina_key_env));
+        if !self.api_key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", self.api_key));
         }
 
         let res = req.send().await.map_err(|e| ZenClawError::ToolExecution { 
@@ -87,10 +91,12 @@ impl Tool for SkillsMpTool {
             message: format!("Search failed: {}", e) 
         })?;
         
-        if !res.status().is_success() {
+        if res.status() == 401 {
+             return Ok("SkillsMP API requires an API key. Please generate one at https://skillsmp.com and set it using `zenclaw config set skillsmp_api_key <KEY>` or by setting SKILLSMP_API_KEY environment variable.".to_string());
+        } else if !res.status().is_success() {
              return Err(ZenClawError::ToolExecution { 
                  tool: "skillsmp".into(), 
-                 message: format!("Jina API Error: {} (ensure JINA_API_KEY is valid)", res.status()) 
+                 message: format!("SkillsMP API Error: {}", res.status()) 
              });
         }
 
@@ -105,29 +111,37 @@ impl Tool for SkillsMpTool {
                 message: format!("Parse json error: {}", e) 
             })?;
             
-        let data_arr = search_data.get("data").and_then(|d| d.as_array());
-        if data_arr.is_none() || data_arr.unwrap().is_empty() {
+        let items_arr = search_data.get("data").and_then(|d| d.get("items")).and_then(|i| i.as_array());
+        if items_arr.is_none() || items_arr.unwrap().is_empty() {
             return Ok(format!("No relevant skills found on SkillsMP for '{}'. You will have to use your own knowledge or standard web search.", query));
         }
 
-        // Try to get the first valid URL
+        // Try to get the first valid github URL
         let mut skill_url_opt = None;
         let mut title_opt = "Unknown Skill".to_string();
         
-        for item in data_arr.unwrap() {
-            if let Some(url) = item.get("url").and_then(|u| u.as_str()) {
-                if url.contains("skillsmp.com") {
-                    skill_url_opt = Some(url.to_string());
-                    if let Some(t) = item.get("title").and_then(|title| title.as_str()) {
-                        title_opt = t.to_string();
+        for item in items_arr.unwrap() {
+            if let Some(url) = item.get("githubUrl").and_then(|u| u.as_str()) {
+                // If it's a GitHub tree link, we fetch the SKILL.md inside it
+                // e.g., https://github.com/author/repo/tree/main/skills/foo -> https://github.com/author/repo/tree/main/skills/foo/SKILL.md
+                let mut scrape_url = url.to_string();
+                if !scrape_url.ends_with(".md") {
+                    if scrape_url.ends_with('/') {
+                        scrape_url.push_str("SKILL.md");
+                    } else {
+                        scrape_url.push_str("/SKILL.md");
                     }
-                    break;
                 }
+                skill_url_opt = Some(scrape_url);
+                if let Some(t) = item.get("name").and_then(|name| name.as_str()) {
+                    title_opt = t.to_string();
+                }
+                break;
             }
         }
         
         if skill_url_opt.is_none() {
-             return Ok(format!("No valid SkillsMP links found in the search results."));
+             return Ok(format!("No valid GitHub links found in the search results."));
         }
         
         let skill_url = skill_url_opt.unwrap();
@@ -139,6 +153,7 @@ impl Tool for SkillsMpTool {
         let mut read_req = self.client.get(&read_url)
             .header("X-Return-Format", "markdown");
             
+        let jina_key_env = std::env::var("JINA_API_KEY").unwrap_or_default();
         if !jina_key_env.is_empty() {
             read_req = read_req.header("Authorization", format!("Bearer {}", jina_key_env));
         }

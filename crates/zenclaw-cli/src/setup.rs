@@ -371,6 +371,7 @@ pub fn run_config_set(key: &str, value: &str) -> anyhow::Result<()> {
         "jina_api_key" => config.tools.jina_api_key = Some(value.to_string()),
         "openweather_api_key" => config.tools.openweather_api_key = Some(value.to_string()),
         "serper_api_key" => config.tools.serper_api_key = Some(value.to_string()),
+        "skillsmp_api_key" => config.tools.skillsmp_api_key = Some(value.to_string()),
         _ => {
             println!("{} Unknown key: {}", "Error:".red(), key);
             println!("\nAvailable keys:");
@@ -387,6 +388,7 @@ pub fn run_config_set(key: &str, value: &str) -> anyhow::Result<()> {
                 "jina_api_key",
                 "openweather_api_key",
                 "serper_api_key",
+                "skillsmp_api_key",
             ] {
                 println!("  • {}", k.cyan());
             }
@@ -560,6 +562,16 @@ pub fn run_config_show() -> anyhow::Result<()> {
         "│".dimmed(),
         "serper_api_key".cyan(),
         if config.tools.serper_api_key.is_some() {
+            "••••••••(set)".green()
+        } else {
+            "(not set)".red()
+        }
+    );
+    println!(
+        "  {} {} = {}",
+        "│".dimmed(),
+        "skillsmp_api_key".cyan(),
+        if config.tools.skillsmp_api_key.is_some() {
             "••••••••(set)".green()
         } else {
             "(not set)".red()
