@@ -83,9 +83,9 @@ impl Tool for WebSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search the internet for current information. Returns titles, URLs, and snippets.\n\
+        "Search the internet for current information using Jina Search (s.jina.ai). Returns titles, URLs, and snippets.\n\
         Provides direct answers for factual questions (who, what, when, where, how).\n\
-        Uses multiple search engines in parallel for maximum reliability.\n\
+        Uses multiple search engines in parallel for maximum reliability, prioritizing Jina's highly accurate AI search.\n\
         IMPORTANT: Detect the language of the user's query and pass it as 'lang' parameter:\n\
         - If user writes in Indonesian/Bahasa Indonesia → pass lang='id'\n\
         - If user writes in English → pass lang='en'\n\
@@ -638,7 +638,9 @@ fn parse_ddg_html(html: &str, max: usize) -> Vec<SearchResult> {
             } else { String::new() }
         };
 
-        if !title.is_empty() && !url.is_empty() {
+        // Filter out search engine redirect URLs that cause Jina rate limits
+        let is_search_engine = url.contains("google.com") || url.contains("bing.com") || url.contains("duckduckgo.com");
+        if !title.is_empty() && !url.is_empty() && !is_search_engine {
             results.push(SearchResult { title, url, snippet });
         }
 
@@ -707,7 +709,9 @@ fn parse_ddg_lite(html: &str, max: usize) -> Vec<SearchResult> {
             String::new()
         };
 
-        if !title.is_empty() {
+        // Filter out search engine redirect URLs that cause Jina rate limits
+        let is_search_engine = url.contains("google.com") || url.contains("bing.com") || url.contains("duckduckgo.com");
+        if !title.is_empty() && !is_search_engine {
             results.push(SearchResult { title, url, snippet });
         }
 

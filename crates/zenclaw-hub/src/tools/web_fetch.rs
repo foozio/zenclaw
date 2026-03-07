@@ -18,6 +18,8 @@ impl WebFetchTool {
         Self {
             client: Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
+                .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                .tcp_keepalive(std::time::Duration::from_secs(10))
                 .build()
                 .unwrap_or_default(),
             max_body_size: 50_000,
@@ -70,6 +72,21 @@ impl Tool for WebFetchTool {
     async fn execute(&self, args: Value) -> Result<String> {
         let url = args["url"].as_str().unwrap_or("");
         let method = args["method"].as_str().unwrap_or("GET").to_uppercase();
+
+        let url_lower = url.to_lowercase();
+        let decoded = url_lower.replace("%2f", "/").replace("%3a", ":").replace("%3f", "?").replace("%3d", "=");
+        if decoded.contains("google.com/search") 
+            || decoded.contains("bing.com/search") 
+            || decoded.contains("duckduckgo.com") 
+            || decoded.contains("yahoo.com") 
+            || decoded.contains("google.com/?")
+        {
+            return Err(zenclaw_core::error::ZenClawError::ToolExecution {
+                tool: "web_fetch".into(),
+                message: "FATAL: You attempted to use `web_fetch` on a search engine URL. This is STRICTLY FORBIDDEN. You MUST completely abort this tool call and use the `web_search` native tool instead. DO NOT RETRY web_fetch. USE web_search!".to_string(),
+            });
+        }
+
 
         let mut request = match method.as_str() {
             "POST" => self.client.post(url),

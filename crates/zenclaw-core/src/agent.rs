@@ -138,6 +138,14 @@ impl Agent {
                 }
             }
         }
+
+        // Inject current date/time so the AI knows what "today" is
+        let now = chrono::Local::now();
+        sys_prompt.push_str(&format!(
+            "\n\n## Current Date & Time\nToday is {}. CRITICAL INSTRUCTION: When asked for 'latest' ('terbaru') news or current events, YOU ARE FORBIDDEN from answering directly from memory. You MUST trigger the `web_search` tool! Do NOT hallucinate events that haven't happened yet.",
+            now.format("%A, %d %B %Y, %H:%M %Z")
+        ));
+
         messages.push(ChatMessage::system(&sys_prompt));
 
         // Token Summarization Strategy (Context Window Control)
@@ -227,6 +235,7 @@ impl Agent {
         // 3. ReAct loop
         let mut iterations = 0;
         let mut audited = false;
+        let mut web_search_called = false; // Track if web_search has been called this session
         let final_response = loop {
             iterations += 1;
             if iterations > self.config.max_iterations {
@@ -345,7 +354,12 @@ impl Agent {
 
             if response.has_tool_calls() {
                 // Agent wants to use tools — execute them
-                let tool_calls = response.tool_calls.clone();
+                let mut tool_calls = response.tool_calls.clone();
+
+                if tool_calls.len() > 5 {
+                    tracing::warn!("LLM generated {} tool calls! Truncating to 5 to prevent proxy/API failures.", tool_calls.len());
+                    tool_calls.truncate(5);
+                }
 
                 // Add assistant message with tool calls to history
                 messages.push(ChatMessage::assistant_with_tools(
@@ -357,6 +371,93 @@ impl Agent {
                 let mut exec_futures = Vec::new();
 
                 for call in tool_calls {
+                    // Track web_search usage
+                    if call.function.name == "web_search" {
+                        web_search_called = true;
+                    }
+
+                    let args: serde_json::Value =
+                        serde_json::from_str(&call.function.arguments).unwrap_or_default();
+
+                    let mut is_search_engine = false;
+                    let mut extracted_query = user_message.to_string();
+
+                    if call.function.name == "web_scrape" || call.function.name == "web_fetch" {
+                        if let Some(url) = args["url"].as_str() {
+                            let url_lower = url.to_lowercase();
+                            let decoded = url_lower.replace("%2f", "/").replace("%3a", ":").replace("%3f", "?").replace("%3d", "=");
+                            if decoded.contains("google.com/search") 
+                                || decoded.contains("duckduckgo.com") 
+                                || decoded.contains("bing.com/search") 
+                                || decoded.contains("yahoo.com") 
+                                || decoded.contains("google.com/?")
+                                || decoded.contains("jina.ai/search")
+                                || decoded.contains("jina.ai/?q=")
+                                || decoded.contains("s.jina.ai")
+                            {
+                                is_search_engine = true;
+                                if let Some(idx) = decoded.find("q=") {
+                                    let q_part = &decoded[idx + 2..];
+                                    let end_idx = q_part.find('&').unwrap_or(q_part.len());
+                                    let query_str = q_part[..end_idx].replace("+", " ");
+                                    if !query_str.is_empty() {
+                                        extracted_query = query_str;
+                                    }
+                                } else if decoded.contains("s.jina.ai/") {
+                                    // Extract from path like https://s.jina.ai/berita+terkini
+                                    let parts: Vec<&str> = decoded.split("s.jina.ai/").collect();
+                                    if parts.len() > 1 {
+                                        let q_part = parts[1];
+                                        let end_idx = q_part.find('?').unwrap_or(q_part.len());
+                                        let query_str = q_part[..end_idx].replace("+", " ").replace("%20", " ");
+                                        if !query_str.is_empty() {
+                                            extracted_query = query_str;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // HARD BLOCK + AUTO-REDIRECT: 
+                    // 1. If web_scrape is called before web_search
+                    // 2. OR if the AI is stubbornly trying to scrape/fetch a search engine page directly
+                    let should_redirect = (call.function.name == "web_scrape" && !web_search_called) || is_search_engine;
+
+                    if should_redirect {
+                        tracing::warn!("INTERCEPTED: Invalid {} attempt. Auto-executing web_search with query '{}'...", call.function.name, extracted_query);
+                        
+                        if let Some(b) = bus {
+                            b.publish_system(SystemEvent {
+                                run_id: session_key.to_string(),
+                                event_type: "tool_redirect".into(),
+                                data: serde_json::json!({ "from": call.function.name, "to": "web_search", "reason": "auto-search interception" }),
+                            });
+                        }
+
+                        // Auto-execute web_search
+                        let search_args = serde_json::json!({"query": extracted_query, "lang": "auto"});
+                        let search_result = match self.tools.execute("web_search", search_args).await {
+                            Ok(r) => r,
+                            Err(e) => format!("web_search failed: {}", e),
+                        };
+                        web_search_called = true;
+
+                        let redirect_msg = format!(
+                            "REDIRECTED: Your `{}` was intercepted because you either forgot to search first, or you tried to scrape a search engine directly. \
+                            I automatically ran `web_search` for you instead. Here are FRESH search results with REAL URLs — \
+                            pick URLs from these results ONLY:\n\n{}",
+                            call.function.name,
+                            search_result
+                        );
+                        messages.push(ChatMessage::tool_result(
+                            &call.id,
+                            &call.function.name,
+                            &redirect_msg,
+                        ));
+                        continue;
+                    }
+
                     if let Some(b) = bus {
                         b.publish_system(SystemEvent {
                             run_id: session_key.to_string(),
@@ -364,9 +465,6 @@ impl Agent {
                             data: serde_json::json!({ "tool": call.function.name, "args": call.function.arguments }),
                         });
                     }
-
-                    let args: serde_json::Value =
-                        serde_json::from_str(&call.function.arguments).unwrap_or_default();
 
                     let call_name = call.function.name.clone();
                     let tool_schema = tool_defs.iter()
@@ -492,10 +590,8 @@ impl Agent {
                 messages.push(ChatMessage::assistant(&answer));
                 messages.push(ChatMessage::user(
                     "CRITICAL: You just described what you WOULD do but didn't actually call any tool. \
-                     Stop explaining and EXECUTE the function call NOW. \
-                     Call the `web_search` tool with the appropriate query. \
-                     If the search fails, tell the user the specific error (e.g., API key issue) \
-                     instead of saying you'll try again."
+                     Stop explaining and EXECUTE the function call NOW using the native tool calling schema. \
+                     Do not output natural language, just trigger the tool immediately."
                 ));
                 continue;
             }
@@ -860,10 +956,18 @@ pub const DEFAULT_SYSTEM_PROMPT: &str = r#"You are ZenClaw, a capable and highly
 
 ## Capabilities & Tool Selection
 You have access to various tools. Use them proactively.
-- For finding information on the internet, ALWAYS use `web_search`. Never use `web_fetch` with a google or bing URL.
-- CRITICAL: If the user explicitly asks you to 'search', 'cari', or look something up, you MUST call the `web_search` tool immediately. DO NOT answer from past conversation memory or training data, as it may be outdated or hallucinated. Always fetch fresh results.
-- For reading the content of a specific article or website, use `web_scrape`.
-- `web_fetch` is ONLY for fetching raw API endpoints or JSON data, never for HTML reading.
+
+### MANDATORY WORKFLOW for any internet research:
+1. FIRST: Call `web_search` to find relevant URLs and snippets.
+2. THEN (only if needed): Call `web_scrape` on URLs returned BY `web_search` to read full article content.
+3. NEVER skip step 1. NEVER call `web_scrape` on a URL you invented, remembered, or guessed from training data.
+
+### Tool Rules:
+- `web_search` (Jina Search): Your PRIMARY tool for ALL internet lookups. Always call this FIRST.
+- `web_scrape` (Jina Reader): ONLY for reading the full text of a specific URL that was already found via `web_search`.
+- `web_fetch`: ONLY for raw API/JSON endpoints. Never for HTML pages.
+- CRITICAL - NO MEMORY ANSWERS FOR NEWS: If the user asks for 'berita terbaru', 'latest news', or current events, YOU ARE STRICTLY FORBIDDEN from answering using your internal memory or training data. You MUST call `web_search` immediately. DO NOT hallucinate or guess events. DO NOT pretend you searched if you haven't triggered the tool.
+- CRITICAL - NO HALLUCINATED URLS: NEVER invent, hallucinate, or guess URLs. URLs from your training data are likely outdated. You MUST obtain fresh URLs from `web_search`.
 
 When executing tasks:
 1. Understand the request fully — ask if unclear

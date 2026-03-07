@@ -95,6 +95,18 @@ impl SystemEvent {
                 Some(format!("⚠️  '{}' timed out — trying a different approach...", tool))
             }
 
+            "tool_blocked" => {
+                let tool = self.data["tool"].as_str().unwrap_or("tool");
+                let reason = self.data["reason"].as_str().unwrap_or("unknown reason");
+                Some(format!("⛔ Blocked '{}' (reason: {}) — re-evaluating...", tool, reason))
+            }
+
+            "tool_redirect" => {
+                let from = self.data["from"].as_str().unwrap_or("tool");
+                let to = self.data["to"].as_str().unwrap_or("tool");
+                Some(format!("🔀 Intercepted '{}'. Auto-executing '{}' first...", from, to))
+            }
+
             "llm_retry" => {
                 let attempt = self.data["attempt"].as_u64().unwrap_or(1);
                 let is_rate_limit = self.data["is_rate_limit"].as_bool().unwrap_or(false);
