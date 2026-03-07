@@ -36,10 +36,8 @@ pub fn run_tui_menu(title: &str, items: &[MenuItem], default_idx: usize) -> io::
                 .filter(|(_, item)| item.label.to_lowercase().contains(&q) || item.action_key.to_lowercase().contains(&q))
                 .collect()
         };
-        if let Some(sel) = list_state.selected() {
-            if sel >= filtered.len() {
-                list_state.select(if filtered.is_empty() { None } else { Some(filtered.len() - 1) });
-            }
+        if let Some(sel) = list_state.selected() && sel >= filtered.len() {
+            list_state.select(if filtered.is_empty() { None } else { Some(filtered.len() - 1) });
         }
 
         guard.terminal.draw(|f| {
@@ -148,10 +146,10 @@ pub fn run_tui_menu(title: &str, items: &[MenuItem], default_idx: usize) -> io::
                         KeyCode::Esc => { filter_mode = false; filter_query.clear(); list_state.select(Some(0)); }
                         KeyCode::Backspace => { filter_query.pop(); list_state.select(Some(0)); }
                         KeyCode::Enter => {
-                            if let Some(sel) = list_state.selected() {
-                                if let Some((_, item)) = filtered.get(sel) {
-                                    selected_action = Some(item.action_key.clone());
-                                }
+                            if let Some(sel) = list_state.selected() 
+                                && let Some((_, item)) = filtered.get(sel) 
+                            {
+                                selected_action = Some(item.action_key.clone());
                             }
                             break;
                         }
@@ -194,10 +192,10 @@ pub fn run_tui_menu(title: &str, items: &[MenuItem], default_idx: usize) -> io::
                             }
                         }
                         KeyCode::Enter => {
-                            if let Some(i) = list_state.selected() {
-                                if let Some((_, item)) = filtered.get(i) {
-                                    selected_action = Some(item.action_key.clone());
-                                }
+                            if let Some(i) = list_state.selected() 
+                                && let Some((_, item)) = filtered.get(i) 
+                            {
+                                selected_action = Some(item.action_key.clone());
                             }
                             break;
                         }
@@ -491,19 +489,15 @@ pub fn run_tui_input(title: &str, prompt: &str, default: &str, hide_input: bool)
             f.render_widget(footer_hint, footer_rect);
         })?;
 
-        match event::read()? {
-            Event::Key(key) => {
-                match key.code {
-                    KeyCode::Esc => { return Ok(None); }
-                    KeyCode::Enter => { break; }
-                    KeyCode::Backspace => { input.pop(); }
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => { return Ok(None); }
-                    KeyCode::Char(c) => { input.push(c); }
-                    _ => {}
-                }
+        if let Event::Key(key) = event::read()? {
+            match key.code {
+                KeyCode::Esc => { return Ok(None); }
+                KeyCode::Enter => { break; }
+                KeyCode::Backspace => { input.pop(); }
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => { return Ok(None); }
+                KeyCode::Char(c) => { input.push(c); }
+                _ => {}
             }
-            // No scrollable content, so no mouse scroll handling needed.
-            _ => {}
         }
     }
 
@@ -936,7 +930,7 @@ pub fn run_tui_log_viewer(
                 Span::raw("")
             };
 
-            let feedback_span = if copy_feedback.map_or(false, |t| t.elapsed().as_secs() < 2) {
+            let feedback_span = if copy_feedback.is_some_and(|t| t.elapsed().as_secs() < 2) {
                 Span::styled(" 📋 Copied! ", THEME.ok().bold())
             } else {
                 Span::raw("")

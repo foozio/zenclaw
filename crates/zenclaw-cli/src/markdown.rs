@@ -101,20 +101,20 @@ pub fn render_markdown(text: &str, width: usize) -> Vec<Line<'static>> {
         }
 
         // ── Numbered lists ─────────────────────────────
-        if let Some(pos) = trimmed.find(". ") {
-            if pos <= 3 && trimmed[..pos].chars().all(|c| c.is_ascii_digit()) {
-                let body = &trimmed[pos + 2..];
-                let num = &trimmed[..pos];
-                let indent = raw.len() - raw.trim_start().len();
-                let pad = " ".repeat(indent);
-                let mut spans = vec![Span::styled(
-                    format!("{}  {}. ", pad, num),
-                    Style::default().fg(THEME.muted),
-                )];
-                spans.extend(parse_inline_markdown(body));
-                lines.push(Line::from(spans));
-                continue;
-            }
+        if let Some(pos) = trimmed.find(". ") 
+            && pos <= 3 && trimmed[..pos].chars().all(|c| c.is_ascii_digit()) 
+        {
+            let body = &trimmed[pos + 2..];
+            let num = &trimmed[..pos];
+            let indent = raw.len() - raw.trim_start().len();
+            let pad = " ".repeat(indent);
+            let mut spans = vec![Span::styled(
+                format!("{}  {}. ", pad, num),
+                Style::default().fg(THEME.muted),
+            )];
+            spans.extend(parse_inline_markdown(body));
+            lines.push(Line::from(spans));
+            continue;
         }
 
         // ── Regular paragraph with inline markdown ─────
@@ -164,7 +164,7 @@ fn parse_inline_markdown(text: &str) -> Vec<Span<'static>> {
             }
             '*' | '_' => {
                 // Check for bold (**) or italic (*)
-                let next_is_same = chars.peek().map_or(false, |(_, nc)| *nc == ch);
+                let next_is_same = chars.peek().is_some_and(|(_, nc)| *nc == ch);
                 if next_is_same {
                     // Bold
                     chars.next(); // consume second *
@@ -174,11 +174,9 @@ fn parse_inline_markdown(text: &str) -> Vec<Span<'static>> {
                     }
                     let mut bold_text = String::new();
                     while let Some((_, c)) = chars.next() {
-                        if c == ch {
-                            if chars.peek().map_or(false, |(_, nc)| *nc == ch) {
-                                chars.next();
-                                break;
-                            }
+                        if c == ch && chars.peek().is_some_and(|(_, nc)| *nc == ch) {
+                            chars.next();
+                            break;
                         }
                         bold_text.push(c);
                     }

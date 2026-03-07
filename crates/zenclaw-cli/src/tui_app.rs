@@ -904,7 +904,7 @@ fn draw_ui(f: &mut ratatui::Frame, app: &App) {
     }
 
     // ── Status bar ─────────────────────────────────────
-    let copy_indicator = if app.copy_feedback.map_or(false, |t| t.elapsed().as_secs() < 2) {
+    let copy_indicator = if app.copy_feedback.is_some_and(|t| t.elapsed().as_secs() < 2) {
         Span::styled(" 📋 Copied! ", THEME.ok())
     } else {
         Span::raw("")

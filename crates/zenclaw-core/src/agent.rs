@@ -96,6 +96,7 @@ impl Agent {
     }
 
     /// Run the ReAct loop for a single user message containing a media payload.
+    #[allow(clippy::too_many_arguments)]
     pub async fn process_with_media(
         &self,
         provider: &dyn LlmProvider,
@@ -124,18 +125,18 @@ impl Agent {
                 data: serde_json::json!({ "query": user_message }),
             });
         }
-        if let Ok(Some(context)) = memory.search_knowledge(user_message, 3).await {
-            if !context.is_empty() {
-                sys_prompt.push_str("\n\n");
-                sys_prompt.push_str(&context);
-                
-                if let Some(b) = bus {
-                    b.publish_system(crate::bus::SystemEvent {
-                        run_id: session_key.to_string(),
-                        event_type: "rag_inject".into(),
-                        data: serde_json::json!({ "status": "RAG Context Injected" }),
-                    });
-                }
+        if let Ok(Some(context)) = memory.search_knowledge(user_message, 3).await
+            && !context.is_empty() 
+        {
+            sys_prompt.push_str("\n\n");
+            sys_prompt.push_str(&context);
+            
+            if let Some(b) = bus {
+                b.publish_system(crate::bus::SystemEvent {
+                    run_id: session_key.to_string(),
+                    event_type: "rag_inject".into(),
+                    data: serde_json::json!({ "status": "RAG Context Injected" }),
+                });
             }
         }
 
@@ -333,22 +334,20 @@ impl Agent {
 
             // ── Reasoning visibility ────────────────────────────
             // Publish reasoning if provided by the model, regardless of tool calls.
-            if let Some(reasoning) = &response.content {
-                if !reasoning.is_empty() {
-                    // Only publish as reasoning if it looks like thinking (longer text or has tool calls)
-                    if response.has_tool_calls() || reasoning.len() > 50 {
-                        tracing::info!("Agent reasoning: {}", if reasoning.len() > 200 { &reasoning[..200] } else { reasoning });
-                        if let Some(b) = bus {
-                            b.publish_system(SystemEvent {
-                                run_id: session_key.to_string(),
-                                event_type: "agent_reasoning".into(),
-                                data: serde_json::json!({ 
-                                    "reasoning": reasoning,
-                                    "iteration": iterations
-                                }),
-                            });
-                        }
-                    }
+            if let Some(reasoning) = &response.content 
+                && !reasoning.is_empty() 
+                && (response.has_tool_calls() || reasoning.len() > 50) 
+            {
+                tracing::info!("Agent reasoning: {}", if reasoning.len() > 200 { &reasoning[..200] } else { reasoning });
+                if let Some(b) = bus {
+                    b.publish_system(SystemEvent {
+                        run_id: session_key.to_string(),
+                        event_type: "agent_reasoning".into(),
+                        data: serde_json::json!({ 
+                            "reasoning": reasoning,
+                            "iteration": iterations
+                        }),
+                    });
                 }
             }
 
@@ -382,37 +381,37 @@ impl Agent {
                     let mut is_search_engine = false;
                     let mut extracted_query = user_message.to_string();
 
-                    if call.function.name == "web_scrape" || call.function.name == "web_fetch" {
-                        if let Some(url) = args["url"].as_str() {
-                            let url_lower = url.to_lowercase();
-                            let decoded = url_lower.replace("%2f", "/").replace("%3a", ":").replace("%3f", "?").replace("%3d", "=");
-                            if decoded.contains("google.com/search") 
-                                || decoded.contains("duckduckgo.com") 
-                                || decoded.contains("bing.com/search") 
-                                || decoded.contains("yahoo.com") 
-                                || decoded.contains("google.com/?")
-                                || decoded.contains("jina.ai/search")
-                                || decoded.contains("jina.ai/?q=")
-                                || decoded.contains("s.jina.ai")
-                            {
-                                is_search_engine = true;
-                                if let Some(idx) = decoded.find("q=") {
-                                    let q_part = &decoded[idx + 2..];
-                                    let end_idx = q_part.find('&').unwrap_or(q_part.len());
-                                    let query_str = q_part[..end_idx].replace("+", " ");
+                    if (call.function.name == "web_scrape" || call.function.name == "web_fetch") 
+                        && let Some(url) = args["url"].as_str() 
+                    {
+                        let url_lower = url.to_lowercase();
+                        let decoded = url_lower.replace("%2f", "/").replace("%3a", ":").replace("%3f", "?").replace("%3d", "=");
+                        if decoded.contains("google.com/search") 
+                            || decoded.contains("duckduckgo.com") 
+                            || decoded.contains("bing.com/search") 
+                            || decoded.contains("yahoo.com") 
+                            || decoded.contains("google.com/?")
+                            || decoded.contains("jina.ai/search")
+                            || decoded.contains("jina.ai/?q=")
+                            || decoded.contains("s.jina.ai")
+                        {
+                            is_search_engine = true;
+                            if let Some(idx) = decoded.find("q=") {
+                                let q_part = &decoded[idx + 2..];
+                                let end_idx = q_part.find('&').unwrap_or(q_part.len());
+                                let query_str = q_part[..end_idx].replace("+", " ");
+                                if !query_str.is_empty() {
+                                    extracted_query = query_str;
+                                }
+                            } else if decoded.contains("s.jina.ai/") {
+                                // Extract from path like https://s.jina.ai/berita+terkini
+                                let parts: Vec<&str> = decoded.split("s.jina.ai/").collect();
+                                if parts.len() > 1 {
+                                    let q_part = parts[1];
+                                    let end_idx = q_part.find('?').unwrap_or(q_part.len());
+                                    let query_str = q_part[..end_idx].replace("+", " ").replace("%20", " ");
                                     if !query_str.is_empty() {
                                         extracted_query = query_str;
-                                    }
-                                } else if decoded.contains("s.jina.ai/") {
-                                    // Extract from path like https://s.jina.ai/berita+terkini
-                                    let parts: Vec<&str> = decoded.split("s.jina.ai/").collect();
-                                    if parts.len() > 1 {
-                                        let q_part = parts[1];
-                                        let end_idx = q_part.find('?').unwrap_or(q_part.len());
-                                        let query_str = q_part[..end_idx].replace("+", " ").replace("%20", " ");
-                                        if !query_str.is_empty() {
-                                            extracted_query = query_str;
-                                        }
                                     }
                                 }
                             }
@@ -611,33 +610,32 @@ impl Agent {
             }
 
             // JSON output mode: validate and auto-retry once if invalid
-            if let Some(ref fmt) = response_format {
-                if fmt == "json" {
-                    if serde_json::from_str::<serde_json::Value>(&answer).is_err() {
-                        tracing::warn!("JSON output mode: response is not valid JSON, retrying once...");
-                        if let Some(b) = bus {
-                            b.publish_system(SystemEvent {
-                                run_id: session_key.to_string(),
-                                event_type: "json_retry".into(),
-                                data: serde_json::json!({ "reason": "invalid_json" }),
-                            });
-                        }
-                        messages.push(ChatMessage::assistant(&answer));
-                        messages.push(ChatMessage::user(
-                            "Your previous response was not valid JSON. Please respond ONLY with a valid JSON object or array. No markdown, no code fences, no explanation — just raw JSON."
-                        ));
-                        let retry_request = ChatRequest {
-                            messages: messages.clone(),
-                            tools: vec![],
-                            model: opts.model.clone().or_else(|| self.config.model.clone()),
-                            max_tokens: self.config.max_tokens,
-                            temperature: self.config.temperature,
-                            response_format: response_format.clone(),
-                        };
-                        if let Ok(retry_resp) = provider.chat(retry_request).await {
-                            answer = retry_resp.content.unwrap_or_default();
-                        }
-                    }
+            if let Some(ref fmt) = response_format 
+                && fmt == "json" 
+                && serde_json::from_str::<serde_json::Value>(&answer).is_err() 
+            {
+                tracing::warn!("JSON output mode: response is not valid JSON, retrying once...");
+                if let Some(b) = bus {
+                    b.publish_system(SystemEvent {
+                        run_id: session_key.to_string(),
+                        event_type: "json_retry".into(),
+                        data: serde_json::json!({ "reason": "invalid_json" }),
+                    });
+                }
+                messages.push(ChatMessage::assistant(&answer));
+                messages.push(ChatMessage::user(
+                    "Your previous response was not valid JSON. Please respond ONLY with a valid JSON object or array. No markdown, no code fences, no explanation — just raw JSON."
+                ));
+                let retry_request = ChatRequest {
+                    messages: messages.clone(),
+                    tools: vec![],
+                    model: opts.model.clone().or_else(|| self.config.model.clone()),
+                    max_tokens: self.config.max_tokens,
+                    temperature: self.config.temperature,
+                    response_format: response_format.clone(),
+                };
+                if let Ok(retry_resp) = provider.chat(retry_request).await {
+                    answer = retry_resp.content.unwrap_or_default();
                 }
             }
 

@@ -638,7 +638,7 @@ pub fn run_model_switcher() -> anyhow::Result<Option<(String, String, Option<Str
                 
             let def_model = if config.provider.provider == "custom" { config.provider.model.clone() } else { "custom-model".to_string() };
             let m = crate::tui_menu::run_tui_input("Custom Model Name", "Enter model name:", &def_model, false)?
-                .unwrap_or_else(|| def_model);
+                .unwrap_or(def_model);
                 
             (Some(base), m)
         } else {

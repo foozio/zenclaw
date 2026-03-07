@@ -506,25 +506,17 @@ async fn main() -> anyhow::Result<()> {
 
     // Check saved config and inject tool API keys into env so we don't have to rewrite tools 
     if let Some(config) = setup::load_saved_config() {
-        if let Some(key) = config.tools.jina_api_key {
-            if !key.trim().is_empty() {
-                unsafe { std::env::set_var("JINA_API_KEY", key); }
-            }
+        if let Some(key) = config.tools.jina_api_key && !key.trim().is_empty() {
+            unsafe { std::env::set_var("JINA_API_KEY", key); }
         }
-        if let Some(key) = config.tools.openweather_api_key {
-            if !key.trim().is_empty() {
-                unsafe { std::env::set_var("OPENWEATHER_API_KEY", key); }
-            }
+        if let Some(key) = config.tools.openweather_api_key && !key.trim().is_empty() {
+            unsafe { std::env::set_var("OPENWEATHER_API_KEY", key); }
         }
-        if let Some(key) = config.tools.serper_api_key {
-            if !key.trim().is_empty() {
-                unsafe { std::env::set_var("SERPER_API_KEY", key); }
-            }
+        if let Some(key) = config.tools.serper_api_key && !key.trim().is_empty() {
+            unsafe { std::env::set_var("SERPER_API_KEY", key); }
         }
-        if let Some(key) = config.tools.skillsmp_api_key {
-            if !key.trim().is_empty() {
-                unsafe { std::env::set_var("SKILLSMP_API_KEY", key); }
-            }
+        if let Some(key) = config.tools.skillsmp_api_key && !key.trim().is_empty() {
+            unsafe { std::env::set_var("SKILLSMP_API_KEY", key); }
         }
     }
 
@@ -778,7 +770,7 @@ async fn main() -> anyhow::Result<()> {
                                         } else {
                                             config.tools.jina_api_key = Some(key.trim().to_string());
                                         }
-                                        if let Ok(()) = config.save(&ZenClawConfig::default_path()) {
+                                        if config.save(&ZenClawConfig::default_path()).is_ok() {
                                             if let Some(ref val) = config.tools.jina_api_key {
                                                 unsafe { std::env::set_var("JINA_API_KEY", val); }
                                             } else {
@@ -795,7 +787,7 @@ async fn main() -> anyhow::Result<()> {
                                         } else {
                                             config.tools.openweather_api_key = Some(key.trim().to_string());
                                         }
-                                        if let Ok(()) = config.save(&ZenClawConfig::default_path()) {
+                                        if config.save(&ZenClawConfig::default_path()).is_ok() {
                                             if let Some(ref val) = config.tools.openweather_api_key {
                                                 unsafe { std::env::set_var("OPENWEATHER_API_KEY", val); }
                                             } else {
@@ -812,7 +804,7 @@ async fn main() -> anyhow::Result<()> {
                                         } else {
                                             config.tools.serper_api_key = Some(key.trim().to_string());
                                         }
-                                        if let Ok(()) = config.save(&ZenClawConfig::default_path()) {
+                                        if config.save(&ZenClawConfig::default_path()).is_ok() {
                                             if let Some(ref val) = config.tools.serper_api_key {
                                                 unsafe { std::env::set_var("SERPER_API_KEY", val); }
                                             } else {
@@ -829,7 +821,7 @@ async fn main() -> anyhow::Result<()> {
                                         } else {
                                             config.tools.skillsmp_api_key = Some(key.trim().to_string());
                                         }
-                                        if let Ok(()) = config.save(&ZenClawConfig::default_path()) {
+                                        if config.save(&ZenClawConfig::default_path()).is_ok() {
                                             if let Some(ref val) = config.tools.skillsmp_api_key {
                                                 unsafe { std::env::set_var("SKILLSMP_API_KEY", val); }
                                             } else {
@@ -1335,12 +1327,11 @@ async fn run_skills(action: Option<SkillAction>) -> anyhow::Result<()> {
 
                     if action_key == "create_new" {
                         let name_input = crate::tui_menu::run_tui_input("New Skill", "Enter internal name (id):", "", false)?;
-                        if let Some(name) = name_input {
-                            if !name.trim().is_empty() {
-                                if let Ok(Some((t, d, c))) = crate::tui_menu::run_tui_skill_editor(&name, &name, "", "") {
-                                    skill_mgr.save_skill(&name, &t, &d, &c).await?;
-                                }
-                            }
+                        if let Some(name) = name_input 
+                            && !name.trim().is_empty()
+                            && let Ok(Some((t, d, c))) = crate::tui_menu::run_tui_skill_editor(&name, &name, "", "") 
+                        {
+                            skill_mgr.save_skill(&name, &t, &d, &c).await?;
                         }
                         continue;
                     }
@@ -1456,11 +1447,9 @@ async fn run_serve(
             Err(e) => {
                 let _ = crate::tui_menu::run_tui_error("Server Startup Failed", &format!("Address {} error: {}\n\nPlease try a different port.", addr_str, e));
                 let input = crate::tui_menu::run_tui_input("Assign New Port", "Enter Port Number:", &port.to_string(), false)?;
-                if let Some(p_str) = input {
-                    if let Ok(p) = p_str.parse() {
-                        port = p;
-                        continue;
-                    }
+                if let Some(p_str) = input && let Ok(p) = p_str.parse() {
+                    port = p;
+                    continue;
                 }
                 break Err(anyhow::anyhow!("Port binding failed. Aborting."));
             }
@@ -1636,23 +1625,23 @@ async fn run_logs(initial_lines: usize) -> anyhow::Result<()> {
     // Spawn async tailing task — sends new lines through the sync channel
     let log_file_clone = log_file.clone();
     let tail_handle = tokio::spawn(async move {
-        if let Ok(file) = File::open(&log_file_clone).await {
-            if let Ok(metadata) = file.metadata().await {
-                let mut reader = BufReader::new(file);
-                let _ = reader.seek(std::io::SeekFrom::Start(metadata.len())).await;
-                let mut buf = String::new();
-                loop {
-                    buf.clear();
-                    match reader.read_line(&mut buf).await {
-                        Ok(0) => tokio::time::sleep(Duration::from_millis(200)).await,
-                        Ok(_) => {
-                            let line = buf.trim_end().to_string();
-                            if !line.is_empty() && tx.send(line).is_err() {
-                                break;
-                            }
+        if let Ok(file) = File::open(&log_file_clone).await 
+            && let Ok(metadata) = file.metadata().await 
+        {
+            let mut reader = BufReader::new(file);
+            let _ = reader.seek(std::io::SeekFrom::Start(metadata.len())).await;
+            let mut buf = String::new();
+            loop {
+                buf.clear();
+                match reader.read_line(&mut buf).await {
+                    Ok(0) => tokio::time::sleep(Duration::from_millis(200)).await,
+                    Ok(_) => {
+                        let line = buf.trim_end().to_string();
+                        if !line.is_empty() && tx.send(line).is_err() {
+                            break;
                         }
-                        Err(_) => tokio::time::sleep(Duration::from_millis(200)).await,
                     }
+                    Err(_) => tokio::time::sleep(Duration::from_millis(200)).await,
                 }
             }
         }

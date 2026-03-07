@@ -104,10 +104,10 @@ impl SlackChannel {
                             match get_messages(&client, &api_base, &bot_token, channel_id, oldest).await {
                                 Ok(messages) => {
                                     for msg in messages.iter().rev() {
-                                        if let Some(user) = &msg.user {
-                                            if user == &bot_user_id {
-                                                continue;
-                                            }
+                                        if let Some(user) = &msg.user 
+                                            && user == &bot_user_id 
+                                        {
+                                            continue;
                                         }
 
                                         let content = msg.text.clone().unwrap_or_default();

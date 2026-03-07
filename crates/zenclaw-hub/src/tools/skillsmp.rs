@@ -125,12 +125,10 @@ impl Tool for SkillsMpTool {
                 // If it's a GitHub tree link, we fetch the SKILL.md inside it
                 // e.g., https://github.com/author/repo/tree/main/skills/foo -> https://github.com/author/repo/tree/main/skills/foo/SKILL.md
                 let mut scrape_url = url.to_string();
-                if !scrape_url.ends_with(".md") {
-                    if scrape_url.ends_with('/') {
-                        scrape_url.push_str("SKILL.md");
-                    } else {
-                        scrape_url.push_str("/SKILL.md");
-                    }
+                if !scrape_url.ends_with(".md") && scrape_url.ends_with('/') {
+                    scrape_url.push_str("SKILL.md");
+                } else if !scrape_url.ends_with(".md") {
+                    scrape_url.push_str("/SKILL.md");
                 }
                 skill_url_opt = Some(scrape_url);
                 if let Some(t) = item.get("name").and_then(|name| name.as_str()) {
@@ -141,7 +139,7 @@ impl Tool for SkillsMpTool {
         }
         
         if skill_url_opt.is_none() {
-             return Ok(format!("No valid GitHub links found in the search results."));
+             return Ok("No valid GitHub links found in the search results.".to_string());
         }
         
         let skill_url = skill_url_opt.unwrap();
