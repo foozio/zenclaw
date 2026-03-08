@@ -281,7 +281,7 @@ impl LlmProvider for OpenAiProvider {
         let msg_summary: Vec<String> = body.messages.iter()
             .map(|m| {
                 let role = m.get("role").and_then(|v| v.as_str()).unwrap_or("unknown");
-                let has_content = m.get("content").map_or(false, |v| !v.is_null() && (v.is_string() && !v.as_str().unwrap().is_empty() || v.is_array() && !v.as_array().unwrap().is_empty()));
+                let has_content = m.get("content").is_some_and(|v| !v.is_null() && (v.is_string() && !v.as_str().unwrap().is_empty() || v.is_array() && !v.as_array().unwrap().is_empty()));
                 format!("role:{},content:{}", role, has_content)
             }).collect();
             

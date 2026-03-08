@@ -275,3 +275,35 @@ pub async fn run_logs(initial_lines: usize) -> anyhow::Result<()> {
     tail_handle.abort();
     Ok(())
 }
+
+pub async fn run_maintenance(retention_days: u32) -> anyhow::Result<()> {
+    println!("{}", "🧹 Running maintenance...".cyan());
+    
+    let data = setup::data_dir();
+    let db_path = data.join("memory.db");
+    
+    if !db_path.exists() {
+        println!("  No memory database found at {}. Skipping history pruning.", db_path.display());
+        return Ok(());
+    }
+
+    match zenclaw_hub::memory::SqliteMemory::open(&db_path) {
+        Ok(mem) => {
+            match mem.prune_history(retention_days).await {
+                Ok(cleaned) => {
+                    println!("  ✅ Pruned {} messages older than {} days.", cleaned, retention_days);
+                }
+                Err(e) => {
+                    println!("  ❌ Failed to prune history: {}", e);
+                }
+            }
+        }
+        Err(e) => {
+            println!("  ❌ Could not open memory database: {}", e);
+        }
+    }
+    
+    println!("{}", "✨ Maintenance complete!".green());
+    Ok(())
+}
+

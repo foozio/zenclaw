@@ -221,6 +221,13 @@ enum Commands {
         #[arg(short, long, default_value_t = 50)]
         lines: usize,
     },
+
+    /// 🧹 Run maintenance tasks (e.g. prune history)
+    Maintenance {
+        /// Number of days of history to retain (default 30)
+        #[arg(long, default_value_t = 30)]
+        retention_days: u32,
+    },
 }
 
 #[derive(Subcommand)]
@@ -678,6 +685,11 @@ async fn main() -> anyhow::Result<()> {
         // ─── Logs Monitoring ───────────────────────────
         Some(Commands::Logs { lines }) => {
             commands::run_logs(lines).await?;
+        }
+
+        // ─── Maintenance ───────────────────────────────
+        Some(Commands::Maintenance { retention_days }) => {
+            commands::run_maintenance(retention_days).await?;
         }
 
         // ─── Default: show interactive menu loop ─────────────
