@@ -51,20 +51,22 @@ impl std::fmt::Display for ProcessStatus {
 pub struct ProcessTool {
     processes: Arc<Mutex<HashMap<String, ManagedProcess>>>,
     max_output_size: usize,
+    allow_command_exec: bool,
 }
 
 impl ProcessTool {
-    pub fn new() -> Self {
+    pub fn new(allow_command_exec: bool) -> Self {
         Self {
             processes: Arc::new(Mutex::new(HashMap::new())),
             max_output_size: 50_000,
+            allow_command_exec,
         }
     }
 }
 
 impl Default for ProcessTool {
     fn default() -> Self {
-        Self::new()
+        Self::new(false)
     }
 }
 
@@ -114,7 +116,7 @@ Actions:
 
         match action {
             "spawn" => {
-                if std::env::var("ZENCLAW_ALLOW_COMMAND_EXEC").unwrap_or_default() != "1" && std::env::var("ZENCLAW_ALLOW_COMMAND_EXEC").unwrap_or_default() != "true" {
+                if !self.allow_command_exec {
                     return Err(zenclaw_core::error::ZenClawError::ToolExecution {
                         tool: "process".to_string(),
                         message: "Process execution disabled by policy. Set ZENCLAW_ALLOW_COMMAND_EXEC=1 to enable.".to_string(),
