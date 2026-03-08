@@ -68,6 +68,13 @@ impl Tool for ShellTool {
     }
 
     async fn execute(&self, args: Value) -> Result<String> {
+        if std::env::var("ZENCLAW_ALLOW_COMMAND_EXEC").unwrap_or_default() != "1" && std::env::var("ZENCLAW_ALLOW_COMMAND_EXEC").unwrap_or_default() != "true" {
+            return Err(zenclaw_core::error::ZenClawError::ToolExecution {
+                tool: "exec".to_string(),
+                message: "Shell execution disabled by policy. Set ZENCLAW_ALLOW_COMMAND_EXEC=1 to enable.".to_string(),
+            });
+        }
+
         let command = args["command"]
             .as_str()
             .unwrap_or("")

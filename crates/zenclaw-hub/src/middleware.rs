@@ -56,11 +56,19 @@ pub async fn rate_limit_middleware(
     next: Next,
 ) -> Response {
     // Use IP or API key as rate limit key
-    let key = headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("unknown")
-        .to_string();
+    let key = request
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|ci| ci.0.ip().to_string())
+        .or_else(|| {
+            // Fallback to strict X-Forwarded-For parsing (take the first valid IP)
+            headers
+                .get("x-forwarded-for")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.split(',').next()) // Take first IP
+                .map(|s| s.trim().to_string())
+        })
+        .unwrap_or_else(|| "unknown".to_string());
 
     // Simple in-memory rate limiter (60 req/min)
     static LIMITER: std::sync::OnceLock<RateLimiter> = std::sync::OnceLock::new();
@@ -89,11 +97,10 @@ pub async fn auth_middleware(
     let expected_key = std::env::var("ZENCLAW_API_KEY").ok();
 
     // If no API key set, allow all requests
-    if expected_key.is_none() {
-        return next.run(request).await;
-    }
-
-    let expected = expected_key.unwrap();
+    let expected = match expected_key {
+        Some(key) => key,
+        None => return next.run(request).await,
+    };
 
     // Check Authorization header
     let auth = headers
